@@ -1,0 +1,15 @@
+{
+  "VideoRoot": "I:\\Video",
+  "DriveLetter": "J:",
+  "MakeMKV_Exe": "C:\\Program Files (x86)\\MakeMKV\\makemkvcon64.exe",
+  "MinLengthSeconds": 3600,
+  "HandBrake_Exe": "C:\\Program Files\\HandBrake\\HandBrakeCLI.exe",
+  "Seconv_Exe": "C:\\Program Files\\Subtitle Edit\\seconv.exe",
+  "MkvMerge_Exe": "C:\\Program Files\\MKVToolNix\\mkvmerge.exe",
+  "MkvPropEdit_Exe": "C:\\Program Files\\MKVToolNix\\mkvpropedit.exe",
+  "TesseractDir": "C:\\Program Files\\Tesseract-OCR",
+  "StableSeconds": 30,
+  "DefaultOcrLanguage": "fin",
+  "AudioLanguages": "fin,eng,jpn",
+  "SubtitleLanguages": "fin,eng"
+}
