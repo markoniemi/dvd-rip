@@ -16,9 +16,9 @@ $MinLengthSeconds = $cfg.MinLengthSeconds
 
 if (!(Test-Path $VideoRoot)) { New-Item -ItemType Directory -Path $VideoRoot | Out-Null }
 
-Write-Host "=====================================================" -ForegroundColor Cyan
-Write-Host " Detecting Disc Title from Drive $DriveLetter..." -ForegroundColor Cyan
-Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host "====================================================="
+Write-Host " Detecting Disc Title from Drive $DriveLetter..."
+Write-Host "====================================================="
 
 # Query MakeMKV for disc information
 $DiscInfo = & $MakeMKV_Exe -r info disc:0 2>&1
@@ -40,7 +40,7 @@ if ([string]::IsNullOrWhiteSpace($DiscTitle) -or $DiscTitle -eq " " -or $DiscTit
     $CleanTitle = $DiscTitle -replace '[\\/:*?"<>|]', '' -replace '\s+', '_'
 }
 
-Write-Host " Detected Movie Title: $CleanTitle" -ForegroundColor Green
+Write-Host " Detected Movie Title: $CleanTitle"
 
 # Each disc gets its own subfolder under Video, so 4_ConvertNext.ps1 can treat
 # any subfolder there as a pending raw rip.
@@ -51,8 +51,8 @@ if (Test-Path $DiscFolder) {
 }
 New-Item -ItemType Directory -Path $DiscFolder | Out-Null
 
-Write-Host " Starting Disc Extraction via MakeMKV..." -ForegroundColor Cyan
-Write-Host " Raw output folder: $DiscFolder" -ForegroundColor Cyan
+Write-Host " Starting Disc Extraction via MakeMKV..."
+Write-Host " Raw output folder: $DiscFolder"
 
 # Extract the main feature
 & $MakeMKV_Exe mkv disc:0 all $DiscFolder --minlength=$MinLengthSeconds
@@ -60,11 +60,11 @@ Write-Host " Raw output folder: $DiscFolder" -ForegroundColor Cyan
 $RippedFiles = Get-ChildItem -Path $DiscFolder -Filter "*.mkv"
 
 if ($RippedFiles) {
-    Write-Host "=====================================================" -ForegroundColor Green
-    Write-Host " Rip completed successfully!" -ForegroundColor Green
-    foreach ($f in $RippedFiles) { Write-Host " - $($f.FullName)" -ForegroundColor Green }
-    Write-Host "=====================================================" -ForegroundColor Green
+    Write-Host "====================================================="
+    Write-Host " Rip completed successfully!"
+    foreach ($f in $RippedFiles) { Write-Host " - $($f.FullName)" }
+    Write-Host "====================================================="
 } else {
-    Write-Host "Error: No main feature found matching criteria." -ForegroundColor Red
+    Write-Host "Error: No main feature found matching criteria."
     Remove-Item -Path $DiscFolder -Force -Recurse -ErrorAction SilentlyContinue
 }

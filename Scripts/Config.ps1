@@ -24,7 +24,7 @@ function Get-RipConfig([hashtable]$Defaults) {
         $overrides = Get-Content $configPath -Raw | ConvertFrom-Json
         foreach ($prop in $overrides.PSObject.Properties) {
             if (-not $Defaults.ContainsKey($prop.Name)) {
-                Write-Host " config.json: ignoring unknown key '$($prop.Name)'" -ForegroundColor DarkYellow
+                Write-Host " config.json: ignoring unknown key '$($prop.Name)'"
                 continue
             }
             $config[$prop.Name] = $prop.Value

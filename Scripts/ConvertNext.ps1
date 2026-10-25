@@ -124,21 +124,21 @@ function Get-MoviePoster($title, $jpgPath) {
             $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
         }
         if (-not $resp.results -or $resp.results.Count -eq 0) {
-            Write-Host " No TMDb match for '$title'." -ForegroundColor Yellow
+            Write-Host " No TMDb match for '$title'."
             return $false
         }
 
         $posterPath = $resp.results[0].poster_path
         if (-not $posterPath) {
-            Write-Host " TMDb match for '$title' has no poster image." -ForegroundColor Yellow
+            Write-Host " TMDb match for '$title' has no poster image."
             return $false
         }
 
         Invoke-WebRequest -Uri "https://image.tmdb.org/t/p/w780$posterPath" -OutFile $jpgPath -ErrorAction Stop
-        Write-Host " Poster saved: $jpgPath" -ForegroundColor Green
+        Write-Host " Poster saved: $jpgPath"
         return $true
     } catch {
-        Write-Host " Poster fetch failed for '$title': $_" -ForegroundColor Yellow
+        Write-Host " Poster fetch failed for '$title': $_"
         return $false
     }
 }
@@ -149,7 +149,7 @@ function Set-CoverArt($mkvPath, $jpgPath) {
     if (-not (Test-Path $jpgPath)) { return }
     & $MkvPropEdit_Exe "$mkvPath" --delete-attachment "name:cover.jpg" `
       --attachment-name "cover.jpg" --attachment-mime-type "image/jpeg" --add-attachment "$jpgPath" 2>&1 |
-        ForEach-Object { Write-Host "   $_" -ForegroundColor DarkCyan }
+        ForEach-Object { Write-Host "   $_" }
 }
 
 # Best-effort: fetch + sidecar jpg + mkv cover attachment for one movie. Never
@@ -167,13 +167,13 @@ function Add-PosterArt($dirName, $targetMkvPath) {
 if ($MarkDone) {
     $dir = Join-Path $VideoRoot $MarkDone
     if (!(Test-Path $dir)) {
-        Write-Host "Error: folder not found: $dir" -ForegroundColor Red
+        Write-Host "Error: folder not found: $dir"
         exit 1
     }
     $files = Get-ChildItem -Path $dir -Filter "*.mkv" -File
     foreach ($f in $files) {
         New-Item -ItemType File -Path (Get-MarkerPath $f) -Force | Out-Null
-        Write-Host " Marked converted: $($f.FullName)" -ForegroundColor Yellow
+        Write-Host " Marked converted: $($f.FullName)"
     }
     exit 0
 }
@@ -204,18 +204,18 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath) {
             $lang = $track.properties.language
             if (-not $lang -or $lang -eq "und") { $lang = $DefaultOcrLanguage }
 
-            Write-Host " Running subtitle OCR on: $rawPath (track #$trackNumber, lang $lang)" -ForegroundColor Cyan
+            Write-Host " Running subtitle OCR on: $rawPath (track #$trackNumber, lang $lang)"
             & $Seconv_Exe "$rawPath" subrip --track-number:$trackNumber --ocr-engine:tesseract --ocr-language:$lang --output-folder:"$ocrDir" --overwrite 2>&1 |
-                ForEach-Object { Write-Host "   $_" -ForegroundColor DarkCyan }
+                ForEach-Object { Write-Host "   $_" }
 
             if ($LASTEXITCODE -ne 0) {
-                Write-Host " seconv OCR failed (exit $LASTEXITCODE) on track #$trackNumber - skipping that track." -ForegroundColor Yellow
+                Write-Host " seconv OCR failed (exit $LASTEXITCODE) on track #$trackNumber - skipping that track."
             }
         }
 
         $srtFiles = Get-ChildItem -Path $ocrDir -Filter "*.srt" -File
         if (-not $srtFiles) {
-            Write-Host " seconv produced no SRT files - keeping bitmap subs only." -ForegroundColor Yellow
+            Write-Host " seconv produced no SRT files - keeping bitmap subs only."
             return
         }
 
@@ -231,14 +231,14 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath) {
         }
 
         $tempOut = "$targetMkvPath.withsubs.tmp.mkv"
-        & $MkvMerge_Exe @remuxArgs | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkCyan }
+        & $MkvMerge_Exe @remuxArgs | ForEach-Object { Write-Host "   $_" }
 
         # mkvmerge exit codes: 0 = ok, 1 = ok with warnings, 2 = failure
         if ($LASTEXITCODE -le 1 -and (Test-Path $tempOut)) {
             Move-Item -Path $tempOut -Destination $targetMkvPath -Force
-            Write-Host " OCR subtitles remuxed into: $targetMkvPath" -ForegroundColor Green
+            Write-Host " OCR subtitles remuxed into: $targetMkvPath"
         } else {
-            Write-Host " mkvmerge remux failed (exit $LASTEXITCODE) - keeping bitmap subs only." -ForegroundColor Yellow
+            Write-Host " mkvmerge remux failed (exit $LASTEXITCODE) - keeping bitmap subs only."
             Remove-Item -Path $tempOut -Force -ErrorAction SilentlyContinue
         }
     } finally {
@@ -250,7 +250,7 @@ if ($RedoSubtitles) {
     $targetDirs = Get-ChildItem -Path $VideoRoot -Directory | Sort-Object Name
     if ($RedoSubtitles -ne "all") { $targetDirs = $targetDirs | Where-Object { $_.Name -eq $RedoSubtitles } }
     if (-not $targetDirs) {
-        Write-Host "Error: folder not found: $RedoSubtitles" -ForegroundColor Red
+        Write-Host "Error: folder not found: $RedoSubtitles"
         exit 1
     }
 
@@ -261,13 +261,13 @@ if ($RedoSubtitles) {
 
         foreach ($raw in $rawFiles) {
             if (-not (Test-Path (Get-MarkerPath $raw))) {
-                Write-Host " Skipping (not converted yet): $($raw.FullName)" -ForegroundColor DarkYellow
+                Write-Host " Skipping (not converted yet): $($raw.FullName)"
                 continue
             }
 
             $outPath = Get-OutputPath $dir $raw $multiple
             if (-not (Test-Path $outPath)) {
-                Write-Host " Skipping (output file missing): $outPath" -ForegroundColor Yellow
+                Write-Host " Skipping (output file missing): $outPath"
                 continue
             }
 
@@ -276,13 +276,13 @@ if ($RedoSubtitles) {
             $hasSrt = $json.tracks | Where-Object { $_.type -eq "subtitles" -and $_.codec -ne "VobSub" }
 
             if (-not $hasSrt) {
-                Write-Host " No OCR'd subtitle track found, nothing to redo: $outPath" -ForegroundColor DarkGray
+                Write-Host " No OCR'd subtitle track found, nothing to redo: $outPath"
                 continue
             }
 
-            Write-Host "=====================================================" -ForegroundColor Cyan
-            Write-Host " Redoing subtitles: $outPath" -ForegroundColor Cyan
-            Write-Host "=====================================================" -ForegroundColor Cyan
+            Write-Host "====================================================="
+            Write-Host " Redoing subtitles: $outPath"
+            Write-Host "====================================================="
 
             $stripped = "$outPath.stripped.tmp.mkv"
             if ($vobsubIds) {
@@ -292,7 +292,7 @@ if ($RedoSubtitles) {
             }
 
             if ($LASTEXITCODE -gt 1 -or -not (Test-Path $stripped)) {
-                Write-Host " Failed to strip old subtitle track (exit $LASTEXITCODE) - skipping." -ForegroundColor Red
+                Write-Host " Failed to strip old subtitle track (exit $LASTEXITCODE) - skipping."
                 Remove-Item -Path $stripped -Force -ErrorAction SilentlyContinue
                 continue
             }
@@ -300,7 +300,7 @@ if ($RedoSubtitles) {
             Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $stripped
 
             Move-Item -Path $stripped -Destination $outPath -Force
-            Write-Host " Done: $outPath" -ForegroundColor Green
+            Write-Host " Done: $outPath"
         }
     }
     exit 0
@@ -310,7 +310,7 @@ if ($FetchPoster) {
     $targetDirs = Get-ChildItem -Path $VideoRoot -Directory | Sort-Object Name
     if ($FetchPoster -ne "all") { $targetDirs = $targetDirs | Where-Object { $_.Name -eq $FetchPoster } }
     if (-not $targetDirs) {
-        Write-Host "Error: folder not found: $FetchPoster" -ForegroundColor Red
+        Write-Host "Error: folder not found: $FetchPoster"
         exit 1
     }
 
@@ -321,19 +321,19 @@ if ($FetchPoster) {
 
         foreach ($raw in $rawFiles) {
             if (-not (Test-Path (Get-MarkerPath $raw))) {
-                Write-Host " Skipping (not converted yet): $($raw.FullName)" -ForegroundColor DarkYellow
+                Write-Host " Skipping (not converted yet): $($raw.FullName)"
                 continue
             }
 
             $outPath = Get-OutputPath $dir $raw $multiple
             if (-not (Test-Path $outPath)) {
-                Write-Host " Skipping (output file missing): $outPath" -ForegroundColor Yellow
+                Write-Host " Skipping (output file missing): $outPath"
                 continue
             }
 
-            Write-Host "=====================================================" -ForegroundColor Cyan
-            Write-Host " Fetching poster for: $outPath" -ForegroundColor Cyan
-            Write-Host "=====================================================" -ForegroundColor Cyan
+            Write-Host "====================================================="
+            Write-Host " Fetching poster for: $outPath"
+            Write-Host "====================================================="
 
             $posterTitle = if ($Title) { $Title } else { $dir.Name }
             Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath
@@ -358,7 +358,7 @@ function Invoke-ConvertPass {
             if (Test-Path $marker) { continue }
 
             if ($raw.LastWriteTime -gt (Get-Date).AddSeconds(-$StableSeconds)) {
-                Write-Host " Skipping (still being written): $($raw.FullName)" -ForegroundColor DarkYellow
+                Write-Host " Skipping (still being written): $($raw.FullName)"
                 continue
             }
 
@@ -367,15 +367,15 @@ function Invoke-ConvertPass {
             $outPath = Get-OutputPath $dir $raw $multiple
 
             if (Test-Path $outPath) {
-                Write-Host " Output already exists, skipping encode and marking done: $outPath" -ForegroundColor Yellow
+                Write-Host " Output already exists, skipping encode and marking done: $outPath"
                 New-Item -ItemType File -Path $marker -Force | Out-Null
                 continue
             }
 
-            Write-Host "=====================================================" -ForegroundColor Cyan
-            Write-Host " Converting: $($raw.FullName)" -ForegroundColor Cyan
-            Write-Host " Output    : $outPath" -ForegroundColor Cyan
-            Write-Host "=====================================================" -ForegroundColor Cyan
+            Write-Host "====================================================="
+            Write-Host " Converting: $($raw.FullName)"
+            Write-Host " Output    : $outPath"
+            Write-Host "====================================================="
 
             & $HandBrake_Exe -i "$($raw.FullName)" -o "$outPath" `
               -e x265 -q 22 `
@@ -383,7 +383,7 @@ function Invoke-ConvertPass {
               --subtitle-lang-list $SubtitleLanguages --all-subtitles
 
             if ($LASTEXITCODE -eq 0 -and (Test-Path $outPath)) {
-                Write-Host " H.265 encode done: $outPath" -ForegroundColor Green
+                Write-Host " H.265 encode done: $outPath"
 
                 if (-not $SkipSubtitles) {
                     Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $outPath
@@ -392,9 +392,9 @@ function Invoke-ConvertPass {
                 Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath
 
                 New-Item -ItemType File -Path $marker -Force | Out-Null
-                Write-Host " Done: $outPath" -ForegroundColor Green
+                Write-Host " Done: $outPath"
             } else {
-                Write-Host " HandBrake failed (exit $LASTEXITCODE) on $($raw.FullName) - will retry next run." -ForegroundColor Red
+                Write-Host " HandBrake failed (exit $LASTEXITCODE) on $($raw.FullName) - will retry next run."
                 Remove-Item -Path $outPath -Force -ErrorAction SilentlyContinue
             }
         }
@@ -406,10 +406,10 @@ function Invoke-ConvertPass {
 do {
     $work = Invoke-ConvertPass
     if (-not $work) {
-        Write-Host "No pending raw files to convert." -ForegroundColor DarkGray
+        Write-Host "No pending raw files to convert."
     }
     if ($Watch) {
-        Write-Host "Waiting $PollSeconds s for new raw folders... (Ctrl+C to stop)" -ForegroundColor DarkGray
+        Write-Host "Waiting $PollSeconds s for new raw folders... (Ctrl+C to stop)"
         Start-Sleep -Seconds $PollSeconds
     }
 } while ($Watch)

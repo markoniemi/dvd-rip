@@ -25,13 +25,13 @@ $cfg = Get-RipConfig @{
 $MkvPropEdit_Exe = $cfg.MkvPropEdit_Exe
 
 if (!(Test-Path $MkvPath)) {
-    Write-Host "Error: file not found: $MkvPath" -ForegroundColor Red
+    Write-Host "Error: file not found: $MkvPath"
     exit 1
 }
 $MkvPath = (Resolve-Path $MkvPath).Path
 
 if (!(Test-Path $ImagePath)) {
-    Write-Host "Error: image not found: $ImagePath" -ForegroundColor Red
+    Write-Host "Error: image not found: $ImagePath"
     exit 1
 }
 $ImagePath = (Resolve-Path $ImagePath).Path
@@ -42,7 +42,7 @@ $mimeType = switch ($ext) {
     "jpeg" { "image/jpeg" }
     "png"  { "image/png" }
     default {
-        Write-Host "Error: unsupported image type '.$ext' (expected .jpg/.jpeg/.png)" -ForegroundColor Red
+        Write-Host "Error: unsupported image type '.$ext' (expected .jpg/.jpeg/.png)"
         exit 1
     }
 }
@@ -51,12 +51,12 @@ $attachmentName = "cover.$ext"
 $sidecarPath = [System.IO.Path]::ChangeExtension($MkvPath, $ext)
 
 Copy-Item -Path $ImagePath -Destination $sidecarPath -Force
-Write-Host " Poster copied: $sidecarPath" -ForegroundColor Green
+Write-Host " Poster copied: $sidecarPath"
 
 # Delete any previous cover attachment regardless of its extension, so
 # switching image formats across runs doesn't leave duplicates behind.
 & $MkvPropEdit_Exe "$MkvPath" --delete-attachment "name:cover.jpg" --delete-attachment "name:cover.png" `
   --attachment-name $attachmentName --attachment-mime-type $mimeType --add-attachment "$sidecarPath" 2>&1 |
-    ForEach-Object { Write-Host "   $_" -ForegroundColor DarkCyan }
+    ForEach-Object { Write-Host "   $_" }
 
-Write-Host "Done: $MkvPath" -ForegroundColor Green
+Write-Host "Done: $MkvPath"

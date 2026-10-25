@@ -40,31 +40,31 @@ $cfg = Get-RipConfig @{
 }
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Write-Host "Error: winget not found. Install 'App Installer' from the Microsoft Store, then re-run this script." -ForegroundColor Red
+    Write-Host "Error: winget not found. Install 'App Installer' from the Microsoft Store, then re-run this script."
     exit 1
 }
 
 function Install-Tool($name, $wingetId, $checkPath) {
     if (Test-Path $checkPath) {
-        Write-Host " $name already installed: $checkPath" -ForegroundColor Green
+        Write-Host " $name already installed: $checkPath"
         return
     }
 
-    Write-Host "=====================================================" -ForegroundColor Cyan
-    Write-Host " Installing $name ($wingetId)..." -ForegroundColor Cyan
-    Write-Host "=====================================================" -ForegroundColor Cyan
+    Write-Host "====================================================="
+    Write-Host " Installing $name ($wingetId)..."
+    Write-Host "====================================================="
 
     & winget install --id $wingetId -e --accept-package-agreements --accept-source-agreements
     if ($LASTEXITCODE -ne 0) {
-        Write-Host " winget install failed for $name (exit $LASTEXITCODE)." -ForegroundColor Red
+        Write-Host " winget install failed for $name (exit $LASTEXITCODE)."
         return
     }
 
     if (Test-Path $checkPath) {
-        Write-Host " $name installed: $checkPath" -ForegroundColor Green
+        Write-Host " $name installed: $checkPath"
     } else {
-        Write-Host " $name: winget reported success but expected path not found: $checkPath" -ForegroundColor Yellow
-        Write-Host " (it may have installed elsewhere - find it and set the matching path in config.json)" -ForegroundColor Yellow
+        Write-Host " ${name}: winget reported success but expected path not found: $checkPath"
+        Write-Host " (it may have installed elsewhere - find it and set the matching path in config.json)"
     }
 }
 
@@ -74,16 +74,16 @@ if (-not $SkipMkvToolNix)   { Install-Tool "MKVToolNix"    "MoritzBunkus.MKVTool
 if (-not $SkipSubtitleEdit) { Install-Tool "Subtitle Edit" "Nikse.SubtitleEdit"       $cfg.Seconv_Exe }
 if (-not $SkipTesseract)    { Install-Tool "Tesseract OCR" "tesseract-ocr.tesseract"  (Join-Path $cfg.TesseractDir "tesseract.exe") }
 
-Write-Host "=====================================================" -ForegroundColor Cyan
-Write-Host " Checking seconv.exe (needs Subtitle Edit 5.4.0-beta5+)..." -ForegroundColor Cyan
-Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host "====================================================="
+Write-Host " Checking seconv.exe (needs Subtitle Edit 5.4.0-beta5+)..."
+Write-Host "====================================================="
 if (-not $SkipSubtitleEdit -and -not (Test-Path $cfg.Seconv_Exe)) {
-    Write-Host " seconv.exe not found at $($cfg.Seconv_Exe)." -ForegroundColor Yellow
-    Write-Host " winget's Subtitle Edit build may be older than 5.4.0-beta5, which is when seconv.exe" -ForegroundColor Yellow
-    Write-Host " was added. Download a newer installer manually from https://www.nikse.dk/subtitleedit" -ForegroundColor Yellow
+    Write-Host " seconv.exe not found at $($cfg.Seconv_Exe)."
+    Write-Host " winget's Subtitle Edit build may be older than 5.4.0-beta5, which is when seconv.exe"
+    Write-Host " was added. Download a newer installer manually from https://www.nikse.dk/subtitleedit"
 } else {
-    Write-Host " OK." -ForegroundColor Green
+    Write-Host " OK."
 }
 
 Write-Host ""
-Write-Host "Done. Remember to also set up Scripts\tmdb_api_key.txt (see README.md) for poster fetching." -ForegroundColor Cyan
+Write-Host "Done. Remember to also set up Scripts\tmdb_api_key.txt (see README.md) for poster fetching."
