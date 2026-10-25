@@ -89,6 +89,21 @@ Useful flags:
 .\Scripts\ConvertNext.ps1 -MarkDone "Kiki"      # mark a folder converted without encoding
 ```
 
+**Preview posters before converting** — fetch a TMDb candidate into every
+raw disc folder that doesn't already have one, so you can check (or swap)
+it before `ConvertNext.ps1` bakes it into the mkv (which uses any jpg/png
+already sitting there instead of asking TMDb):
+
+```bash
+.\Scripts\FetchPosterPreview.ps1                                     # all raw folders missing a poster
+.\Scripts\FetchPosterPreview.ps1 -DirName "Kiki"                     # just that one
+.\Scripts\FetchPosterPreview.ps1 -DirName "Kiki" -Title "Kiki's Delivery Service"
+```
+
+Never overwrites a folder that already has an image. Saves as
+`poster.jpg` otherwise. Delete or replace it there if it's wrong —
+whatever's left when you run `ConvertNext.ps1` becomes the cover.
+
 **Fix a poster** — disc folder names don't always match TMDb's title, so
 the auto-guessed poster can be wrong. Once you have a better image saved
 locally (e.g. picked by hand from TMDb):

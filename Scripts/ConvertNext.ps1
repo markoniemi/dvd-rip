@@ -45,11 +45,14 @@
 #                                           # converted file without touching video/
 #                                           # subs. Pass "all" to backfill every one.
 #
-# Poster images come from TMDb and need a free API key saved as plain text in
-# tmdb_api_key.txt next to this script (https://www.themoviedb.org/settings/api).
-# Each movie gets a sidecar "<name>.jpg" next to its mkv AND an embedded cover
-# attachment in the mkv itself (via mkvpropedit) - best-effort, never blocks
-# the rest of the pipeline on failure.
+# Poster images: if a .jpg/.jpeg/.png is sitting in the raw disc folder, that
+# wins and gets used as-is (drop one there by hand to fix a bad TMDb guess
+# up front). Otherwise it's fetched from TMDb, which needs a free API key
+# saved as plain text in tmdb_api_key.txt next to this script
+# (https://www.themoviedb.org/settings/api). Either way, the movie gets a
+# sidecar image next to its mkv AND an embedded cover attachment in the mkv
+# itself (via mkvpropedit) - best-effort, never blocks the rest of the
+# pipeline on failure.
 # ==============================================================================
 
 param(
@@ -143,19 +146,55 @@ function Get-MoviePoster($title, $jpgPath) {
     }
 }
 
-# Attaches $jpgPath into $mkvPath as a "cover.jpg" attachment, replacing any
-# previous one of that name so reruns don't pile up duplicates.
-function Set-CoverArt($mkvPath, $jpgPath) {
-    if (-not (Test-Path $jpgPath)) { return }
-    & $MkvPropEdit_Exe "$mkvPath" --delete-attachment "name:cover.jpg" `
-      --attachment-name "cover.jpg" --attachment-mime-type "image/jpeg" --add-attachment "$jpgPath" 2>&1 |
+function Get-ImageMimeType($ext) {
+    switch ($ext.TrimStart('.').ToLowerInvariant()) {
+        "jpg"  { return "image/jpeg" }
+        "jpeg" { return "image/jpeg" }
+        "png"  { return "image/png" }
+        default { return $null }
+    }
+}
+
+# Attaches $imagePath into $mkvPath as a "cover.<ext>" attachment, replacing
+# any previous cover (jpg or png) so reruns/format switches don't pile up
+# duplicates.
+function Set-CoverArt($mkvPath, $imagePath) {
+    if (-not (Test-Path $imagePath)) { return }
+    $ext = [System.IO.Path]::GetExtension($imagePath).TrimStart('.').ToLowerInvariant()
+    $mimeType = Get-ImageMimeType $ext
+    if (-not $mimeType) {
+        Write-Host " Unsupported poster image type '.$ext' - not attaching."
+        return
+    }
+    & $MkvPropEdit_Exe "$mkvPath" --delete-attachment "name:cover.jpg" --delete-attachment "name:cover.png" `
+      --attachment-name "cover.$ext" --attachment-mime-type $mimeType --add-attachment "$imagePath" 2>&1 |
         ForEach-Object { Write-Host "   $_" }
 }
 
-# Best-effort: fetch + sidecar jpg + mkv cover attachment for one movie. Never
-# blocks the caller on failure.
-function Add-PosterArt($dirName, $targetMkvPath) {
-    if ($SkipPoster -or -not $TmdbApiKey) { return }
+# A jpg/png already sitting in the raw disc folder (dropped there by hand)
+# wins over TMDb - lets you pre-seed the right cover for discs TMDb can't
+# guess from the folder name. Picks the first match if there's more than one.
+function Get-LocalPosterImage($rawDirPath) {
+    if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
+    return Get-ChildItem -Path $rawDirPath -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
+}
+
+# Best-effort: sidecar image + mkv cover attachment for one movie. Uses a
+# jpg/png already in $rawDirPath if there is one, otherwise fetches from
+# TMDb. Never blocks the caller on failure.
+function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
+    if ($SkipPoster) { return }
+
+    $localImage = Get-LocalPosterImage $rawDirPath
+    if ($localImage) {
+        $posterPath = [System.IO.Path]::ChangeExtension($targetMkvPath, $localImage.Extension.TrimStart('.'))
+        Copy-Item -Path $localImage.FullName -Destination $posterPath -Force
+        Write-Host " Using local poster image: $($localImage.FullName)"
+        Set-CoverArt $targetMkvPath $posterPath
+        return
+    }
+
+    if (-not $TmdbApiKey) { return }
 
     $jpgPath = [System.IO.Path]::ChangeExtension($targetMkvPath, "jpg")
     $title = Get-MovieTitleGuess $dirName
@@ -336,7 +375,7 @@ if ($FetchPoster) {
             Write-Host "====================================================="
 
             $posterTitle = if ($Title) { $Title } else { $dir.Name }
-            Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath
+            Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath -rawDirPath $dir.FullName
         }
     }
     exit 0
@@ -389,7 +428,7 @@ function Invoke-ConvertPass {
                     Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $outPath
                 }
 
-                Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath
+                Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath -rawDirPath $dir.FullName
 
                 New-Item -ItemType File -Path $marker -Force | Out-Null
                 Write-Host " Done: $outPath"
