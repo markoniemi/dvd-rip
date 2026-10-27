@@ -3,4 +3,3 @@
 # Local machine-specific settings and secrets - never commit these.
 Scripts/config.json
 Scripts/tmdb_api_key.txt
-Scripts/FixPosters.ps1

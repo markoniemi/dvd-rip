@@ -4,8 +4,8 @@ Rips DVDs/Blu-rays, encodes to H.265, OCRs subtitles, and tags the result
 with a TMDb poster. PowerShell scripts, Windows only.
 
 Pipeline: `RipDisc.ps1` (disc → raw mkv) → `ConvertNext.ps1` (raw mkv →
-H.265 + OCR'd subs + poster). `FixPoster.ps1` fixes a wrong/missing poster
-afterwards.
+H.265 + OCR'd subs + poster). `FixPosters.ps1` re-applies posters to
+already-converted files afterwards.
 
 ## 1. Install required tools
 
@@ -104,13 +104,19 @@ Never overwrites a folder that already has an image. Saves as
 `poster.jpg` otherwise. Delete or replace it there if it's wrong —
 whatever's left when you run `ConvertNext.ps1` becomes the cover.
 
-**Fix a poster** — disc folder names don't always match TMDb's title, so
-the auto-guessed poster can be wrong. Once you have a better image saved
-locally (e.g. picked by hand from TMDb):
+**Fix posters** — disc folder names don't always match TMDb's title, so
+the auto-guessed poster can be wrong. Drop a better image into the raw
+disc folder (replacing the one already there) and re-apply it:
 
 ```bash
-.\Scripts\FixPoster.ps1 -MkvPath "I:\Video\Kiki.mkv" -ImagePath "C:\Downloads\poster.jpg"
+.\Scripts\FixPosters.ps1                  # every converted file with a poster in its raw folder
+.\Scripts\FixPosters.ps1 -DirName "Kiki"  # just that one raw folder
 ```
 
-Removes the old cover attachment, copies the given image in as the
-sidecar jpg/png, and re-attaches it to the mkv. Accepts `.jpg`/`.jpeg`/`.png`.
+Walks every raw folder under `VideoRoot`, and for each raw mkv that is
+marked converted and whose converted output exists, copies that folder's
+jpg/jpeg/png next to the converted mkv (named after it) and re-attaches it
+as the mkv's cover, replacing the old attachment. Raw folders with no
+image, files not yet converted, and files whose converted output is
+missing are all skipped — nothing is fetched from TMDb here. Accepts
+`.jpg`/`.jpeg`/`.png`.

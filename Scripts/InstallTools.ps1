@@ -4,7 +4,7 @@
 # Installs (skips any that's already present at its expected path):
 #   - MakeMKV           (RipDisc.ps1)
 #   - HandBrakeCLI       (ConvertNext.ps1 - encode)
-#   - MKVToolNix         (ConvertNext.ps1/FixPoster.ps1 - mkvmerge/mkvpropedit)
+#   - MKVToolNix         (ConvertNext.ps1/FixPosters.ps1 - mkvmerge/mkvpropedit)
 #   - Subtitle Edit      (ConvertNext.ps1 - seconv.exe OCR CLI)
 #   - Tesseract OCR      (ConvertNext.ps1 - OCR engine seconv shells out to)
 #
