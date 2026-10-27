@@ -176,7 +176,7 @@ function Set-CoverArt($mkvPath, $imagePath) {
 # guess from the folder name. Picks the first match if there's more than one.
 function Get-LocalPosterImage($rawDirPath) {
     if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
-    return Get-ChildItem -Path $rawDirPath -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
+    return Get-ChildItem -Path (Join-Path $rawDirPath "*") -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
 }
 
 # Best-effort: sidecar image + mkv cover attachment for one movie. Uses a

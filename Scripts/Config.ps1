@@ -7,6 +7,10 @@
 # default. config.json is optional - skip it and everything just uses
 # defaults as before.
 #
+# config.json is shared across all scripts, so it can hold keys a given
+# script doesn't use (e.g. RipDisc.ps1 ignores ConvertNext.ps1's keys) -
+# that's expected, not an error.
+#
 # Usage (in another script):
 #   . (Join-Path $PSScriptRoot "Config.ps1")
 #   $cfg = Get-RipConfig @{
@@ -23,10 +27,9 @@ function Get-RipConfig([hashtable]$Defaults) {
     if (Test-Path $configPath) {
         $overrides = Get-Content $configPath -Raw | ConvertFrom-Json
         foreach ($prop in $overrides.PSObject.Properties) {
-            if (-not $Defaults.ContainsKey($prop.Name)) {
-                Write-Host " config.json: ignoring unknown key '$($prop.Name)'"
-                continue
-            }
+            # Keys this script doesn't declare belong to another script -
+            # config.json is shared, so silently skip them.
+            if (-not $Defaults.ContainsKey($prop.Name)) { continue }
             $config[$prop.Name] = $prop.Value
         }
     }

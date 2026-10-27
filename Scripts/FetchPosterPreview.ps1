@@ -49,7 +49,7 @@ function Get-MovieTitleGuess($dirName) {
 
 # Same lookup ConvertNext.ps1 uses to decide a raw folder already has a poster.
 function Get-LocalPosterImage($dirPath) {
-    return Get-ChildItem -Path $dirPath -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
+    return Get-ChildItem -Path (Join-Path $dirPath "*") -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
 }
 
 # Searches TMDb for $title and saves the first match's poster as
