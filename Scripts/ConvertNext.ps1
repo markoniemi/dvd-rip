@@ -417,6 +417,7 @@ function Invoke-ConvertPass {
             Write-Host "====================================================="
 
             & $HandBrake_Exe -i "$($raw.FullName)" -o "$outPath" `
+              --verbose=0 `
               -e x265 -q 22 `
               --audio-lang-list $AudioLanguages --all-audio --aencoder copy `
               --subtitle-lang-list $SubtitleLanguages --all-subtitles
