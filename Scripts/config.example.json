@@ -6,6 +6,7 @@
   "HandBrake_Exe": "C:\\Program Files\\HandBrake\\HandBrakeCLI.exe",
   "Seconv_Exe": "C:\\Program Files\\Subtitle Edit\\seconv.exe",
   "MkvMerge_Exe": "C:\\Program Files\\MKVToolNix\\mkvmerge.exe",
+  "MkvExtract_Exe": "C:\\Program Files\\MKVToolNix\\mkvextract.exe",
   "MkvPropEdit_Exe": "C:\\Program Files\\MKVToolNix\\mkvpropedit.exe",
   "TesseractDir": "C:\\Program Files\\Tesseract-OCR",
   "StableSeconds": 30,

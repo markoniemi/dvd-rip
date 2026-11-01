@@ -11,6 +11,15 @@
 #      original bitmap subtitle tracks (nothing is dropped; see
 #      -ReplaceBitmapSubs to change that).
 #
+# Output naming: a raw folder is normally a movie, and the output is named
+# after the folder ("Kiki.mkv", or "Kiki - C1_t01.mkv" when the folder holds
+# several files). A folder named "<Show>_S<season>" is a TV season instead:
+# files in it called E01.mkv, E02.mkv, ... come out as "<Show> - S01E01.mkv",
+# which Plex/Jellyfin parse. A file holding several episodes (a DVD "Play All"
+# title) is named for its range, "E01-E03.mkv" -> "<Show> - S01E01-E03.mkv".
+# RipDisc.ps1 -Title The_Crown_S01 -Index 1 is what produces such a folder;
+# see Get-SeriesInfo in Config.ps1.
+#
 # Raw files are never touched or deleted - clean them up manually once you've
 # checked the output.
 #
@@ -47,7 +56,10 @@
 #
 # Poster images: if a .jpg/.jpeg/.png is sitting in the raw disc folder, that
 # wins and gets used as-is (drop one there by hand to fix a bad TMDb guess
-# up front). Otherwise it's fetched from TMDb, which needs a free API key
+# up front). Otherwise it's fetched from TMDb - the tv endpoint for a season
+# folder, cached as poster.jpg in the raw folder so every episode of that
+# season reuses one lookup, the movie endpoint for anything else. TMDb needs a
+# free API key
 # saved as plain text in tmdb_api_key.txt next to this script
 # (https://www.themoviedb.org/settings/api). Either way, the movie gets a
 # sidecar image next to its mkv AND an embedded cover attachment in the mkv
@@ -103,8 +115,21 @@ if (Test-Path $TmdbApiKeyFile) { $TmdbApiKey = (Get-Content $TmdbApiKeyFile -Raw
 
 function Get-MarkerPath($file) { "$($file.FullName).converted" }
 
+# Flat output name for one raw file. A TV season folder (see Get-SeriesInfo in
+# Config.ps1) holding E05.mkv gives "The Crown - S01E05.mkv", and E01-E03.mkv
+# gives "The Crown - S01E01-E03.mkv"; anything else keeps the old behavior -
+# the folder name, plus the raw file name when the folder holds more than one
+# file.
 function Get-OutputPath($dir, $raw, $multiple) {
-    $outBase = if ($multiple) { "$($dir.Name) - $($raw.BaseName)" } else { $dir.Name }
+    $series = Get-SeriesInfo $dir.Name
+    $episode = Get-EpisodeTag $raw.BaseName
+    if ($series -and $episode) {
+        $outBase = "{0} - S{1:D2}{2}" -f $series.Show, $series.Season, $episode.Tag
+    } elseif ($multiple) {
+        $outBase = "$($dir.Name) - $($raw.BaseName)"
+    } else {
+        $outBase = $dir.Name
+    }
     return Join-Path $VideoRoot "$outBase.mkv"
 }
 
@@ -116,15 +141,16 @@ function Get-MovieTitleGuess($dirName) {
     return $t.Trim()
 }
 
-# Searches TMDb for $title and downloads its poster to $jpgPath. Best-effort:
-# returns $false (and leaves no file) on any failure - never throws.
-function Get-MoviePoster($title, $jpgPath) {
+# Searches TMDb for $title and downloads its poster to $jpgPath. $searchType is
+# the TMDb endpoint to use: "movie", or "tv" for a series. Best-effort: returns
+# $false (and leaves no file) on any failure - never throws.
+function Get-MoviePoster($title, $jpgPath, $searchType = "movie") {
     if (-not $TmdbApiKey) { return $false }
     try {
         $query = [uri]::EscapeDataString($title)
-        $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$TmdbApiKey&query=$query&language=fi-FI" -ErrorAction Stop
+        $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query&language=fi-FI" -ErrorAction Stop
         if (-not $resp.results -or $resp.results.Count -eq 0) {
-            $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
+            $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
         }
         if (-not $resp.results -or $resp.results.Count -eq 0) {
             Write-Host " No TMDb match for '$title'."
@@ -179,13 +205,39 @@ function Get-LocalPosterImage($rawDirPath) {
     return Get-ChildItem -Path (Join-Path $rawDirPath "*") -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
 }
 
-# Best-effort: sidecar image + mkv cover attachment for one movie. Uses a
-# jpg/png already in $rawDirPath if there is one, otherwise fetches from
-# TMDb. Never blocks the caller on failure.
+# One poster for a whole TV season, fetched once and cached in the raw folder
+# as poster.jpg - the same file FetchPosterPreview.ps1 writes and
+# Get-LocalPosterImage looks for, so the remaining episodes of the season reuse
+# it instead of hitting TMDb once per file. Returns the cached file, or $null.
+function Get-SeriesPosterImage($show, $rawDirPath) {
+    if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
+    $posterFile = Join-Path $rawDirPath "poster.jpg"
+    Write-Host " Looking up TV poster for series '$show'..."
+    if (-not (Get-MoviePoster $show $posterFile "tv")) {
+        # A download that died halfway would otherwise leave a broken poster.jpg
+        # behind, and every later episode of the season would reuse it.
+        Remove-Item -Path $posterFile -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+    return Get-Item -LiteralPath $posterFile
+}
+
+# Best-effort: sidecar image + mkv cover attachment for one movie or episode.
+# Uses a jpg/png already in $rawDirPath if there is one; otherwise fetches from
+# TMDb - the tv endpoint for a season folder (see Get-SeriesInfo in Config.ps1),
+# the movie endpoint for anything else. Never blocks the caller on failure.
 function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
     if ($SkipPoster) { return }
 
     $localImage = Get-LocalPosterImage $rawDirPath
+
+    # A season folder gets one series poster, cached as poster.jpg, which the
+    # local-image branch below then uses for this and every later episode.
+    if (-not $localImage -and $TmdbApiKey) {
+        $series = Get-SeriesInfo $dirName
+        if ($series) { $localImage = Get-SeriesPosterImage $series.Show $rawDirPath }
+    }
+
     if ($localImage) {
         $posterPath = [System.IO.Path]::ChangeExtension($targetMkvPath, $localImage.Extension.TrimStart('.'))
         Copy-Item -Path $localImage.FullName -Destination $posterPath -Force
@@ -195,6 +247,10 @@ function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
     }
 
     if (-not $TmdbApiKey) { return }
+
+    # Season folder with no poster: the tv lookup above already failed, and a
+    # movie search for "The_Crown_S01" would only find nonsense.
+    if (Get-SeriesInfo $dirName) { return }
 
     $jpgPath = [System.IO.Path]::ChangeExtension($targetMkvPath, "jpg")
     $title = Get-MovieTitleGuess $dirName

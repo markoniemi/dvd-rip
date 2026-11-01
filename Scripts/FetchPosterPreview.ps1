@@ -17,6 +17,10 @@
 #   .\FetchPosterPreview.ps1 -DirName "Kiki"                    # just that one folder
 #   .\FetchPosterPreview.ps1 -DirName "Kiki" -Title "Kiki's Delivery Service"
 #
+# A "<Show>_S<season>" folder (see Get-SeriesInfo in Config.ps1) is searched on
+# TMDb's tv endpoint under the show name - one poster.jpg for the whole season,
+# which every episode of it then reuses.
+#
 # Requires the same tmdb_api_key.txt next to this script as the other scripts.
 # ==============================================================================
 
@@ -52,14 +56,15 @@ function Get-LocalPosterImage($dirPath) {
     return Get-ChildItem -Path (Join-Path $dirPath "*") -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
 }
 
-# Searches TMDb for $title and saves the first match's poster as
-# "poster.jpg" in $dirPath. Best-effort: logs and returns on any failure.
-function Save-PosterPreview($dirPath, $title) {
+# Searches TMDb for $title and saves the first match's poster as "poster.jpg"
+# in $dirPath. $searchType is the TMDb endpoint: "movie", or "tv" for a series.
+# Best-effort: logs and returns on any failure.
+function Save-PosterPreview($dirPath, $title, $searchType = "movie") {
     try {
         $query = [uri]::EscapeDataString($title)
-        $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$TmdbApiKey&query=$query&language=fi-FI" -ErrorAction Stop
+        $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query&language=fi-FI" -ErrorAction Stop
         if (-not $resp.results -or $resp.results.Count -eq 0) {
-            $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/movie?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
+            $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
         }
     } catch {
         Write-Host " TMDb search failed for '$title': $_"
@@ -71,10 +76,14 @@ function Save-PosterPreview($dirPath, $title) {
         return
     }
 
+    # tv results carry name/first_air_date where movie results carry title/release_date.
     $match = $resp.results[0]
+    $matchName = if ($match.title) { $match.title } else { $match.name }
+    $matchDate = if ($match.release_date) { $match.release_date } else { $match.first_air_date }
+
     $posterPath = $match.poster_path
     if (-not $posterPath) {
-        Write-Host " TMDb match '$($match.title)' ($($match.release_date)) has no poster image."
+        Write-Host " TMDb match '$matchName' ($matchDate) has no poster image."
         return
     }
 
@@ -86,7 +95,7 @@ function Save-PosterPreview($dirPath, $title) {
         return
     }
 
-    Write-Host " TMDb match: $($match.title) ($($match.release_date))"
+    Write-Host " TMDb match: $matchName ($matchDate)"
     Write-Host " Poster saved: $posterFile"
 }
 
@@ -106,8 +115,21 @@ foreach ($dir in $targetDirs) {
 
     Write-Host " Fetching poster preview for: $($dir.FullName)"
 
-    $searchTitle = if ($Title) { $Title } else { Get-MovieTitleGuess $dir.Name }
-    Save-PosterPreview $dir.FullName $searchTitle
+    # A "<Show>_S<season>" folder is a TV season - search the tv endpoint for
+    # the show name, not the movie endpoint for "The_Crown_S01".
+    $series = Get-SeriesInfo $dir.Name
+    if ($Title) {
+        $searchTitle = $Title
+        $searchType = if ($series) { "tv" } else { "movie" }
+    } elseif ($series) {
+        $searchTitle = $series.Show
+        $searchType = "tv"
+    } else {
+        $searchTitle = Get-MovieTitleGuess $dir.Name
+        $searchType = "movie"
+    }
+
+    Save-PosterPreview $dir.FullName $searchTitle $searchType
 }
 
 Write-Host ""

@@ -68,7 +68,42 @@ machine-specific), so this never gets committed.
 ```
 
 Rips the main feature(s) with MakeMKV into a new subfolder under
-`I:\Video`.
+`I:\Video`, named after the disc label.
+
+Disc labels are often useless (`G7_67158D1`), so name the folder yourself:
+
+```bash
+.\Scripts\RipDisc.ps1 -Title Kikis_Delivery_Service
+```
+
+**TV series** — a folder named `<Show>_S<season>` holds a whole season, and
+`-Index` is the first episode number on the disc in the drive:
+
+```bash
+.\Scripts\RipDisc.ps1 -Title The_Crown_S01 -Index 1   # disc 1 -> E01.mkv, E02.mkv
+.\Scripts\RipDisc.ps1 -Title The_Crown_S01 -Index 3   # disc 2 -> E03.mkv, E04.mkv
+```
+
+With `-Title` an existing folder is reused, so every disc of the season
+lands in one folder; without it, a timestamp suffix keeps earlier rips
+intact. `ConvertNext.ps1` turns `The_Crown_S01\E05.mkv` into
+`The Crown - S01E05.mkv`, which Plex/Jellyfin parse.
+
+`-Index` numbers the files in MakeMKV title order, which is *usually*
+episode order — a "Play All" title or a bonus feature longer than
+`MinLengthSeconds` shifts everything by one. Every rip appends the disc's
+title table (duration, chapter count, source VOB, and whether
+`--minlength` keeps it) to `titles.txt` in the output folder; check it
+against the renames the script prints before converting. If `-Index` was
+wrong, rename the files by hand — the episode number lives in the raw
+file name, so `ConvertNext.ps1` picks up the correction. A "Play All"
+title that holds several episodes can be kept whole and named for its
+range instead: `E01-E03.mkv`.
+
+Note that `MinLengthSeconds` (3000 in `config.example.json`, 3600 by
+default) drops TV episodes — a 47-minute episode is only 2820 s. Lower it
+in `config.json` to about `1200` before ripping a series, and check
+`titles.txt` to see what that lets through.
 
 **Convert pending rips** — encodes any raw rip not yet converted, OCRs its
 subtitles, and attaches a TMDb poster:
@@ -76,6 +111,16 @@ subtitles, and attaches a TMDb poster:
 ```bash
 .\Scripts\ConvertNext.ps1
 ```
+
+Output is named after the raw folder (`Kiki.mkv`, or `Kiki - C1_t01.mkv`
+when the folder holds several files). A `<Show>_S<season>` folder is
+treated as a TV season instead: `E01.mkv` in it comes out as
+`<Show> - S01E01.mkv`. A file holding several episodes — a DVD "Play All"
+title — is named for its range, `E01-E03.mkv` →
+`<Show> - S01E01-E03.mkv`, which Plex reads as all three. The poster comes
+from TMDb's tv endpoint —
+fetched once per season, cached as `poster.jpg` in the raw folder so every
+episode reuses it.
 
 Useful flags:
 

@@ -44,7 +44,15 @@ if (!(Test-Path $VideoRoot)) {
 function Get-MarkerPath($file) { "$($file.FullName).converted" }
 
 function Get-OutputPath($dir, $raw, $multiple) {
-    $outBase = if ($multiple) { "$($dir.Name) - $($raw.BaseName)" } else { $dir.Name }
+    $series = Get-SeriesInfo $dir.Name
+    $episode = Get-EpisodeTag $raw.BaseName
+    if ($series -and $episode) {
+        $outBase = "{0} - S{1:D2}{2}" -f $series.Show, $series.Season, $episode.Tag
+    } elseif ($multiple) {
+        $outBase = "$($dir.Name) - $($raw.BaseName)"
+    } else {
+        $outBase = $dir.Name
+    }
     return Join-Path $VideoRoot "$outBase.mkv"
 }
 
