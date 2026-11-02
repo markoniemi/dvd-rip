@@ -89,6 +89,15 @@ lands in one folder; without it, a timestamp suffix keeps earlier rips
 intact. `ConvertNext.ps1` turns `The_Crown_S01\E05.mkv` into
 `The Crown - S01E05.mkv`, which Plex/Jellyfin parse.
 
+MakeMKV names its files after the disc volume label (`C1_t00.mkv`), and
+discs of one season often carry the *same* label, so disc 2 would
+otherwise write over disc 1. Each rip therefore lands in a `_rip`
+subfolder first and is moved up afterwards (a rename, not a copy); a name
+already taken gets a disc counter, `C1_d2_t00.mkv`. Nothing is
+overwritten, and only this disc's files are renamed by `-Index`, so
+unrenamed titles from an earlier disc are left where they are. Both
+`_rip` and the counter are invisible to the rest of the pipeline.
+
 `-Index` numbers the files in MakeMKV title order, which is *usually*
 episode order — a "Play All" title or a bonus feature longer than
 `MinLengthSeconds` shifts everything by one. Every rip appends the disc's
@@ -104,6 +113,30 @@ Note that `MinLengthSeconds` (3000 in `config.example.json`, 3600 by
 default) drops TV episodes — a 47-minute episode is only 2820 s. Lower it
 in `config.json` to about `1200` before ripping a series, and check
 `titles.txt` to see what that lets through.
+
+**Name a season's titles by arithmetic** — rather than trusting title
+order, `NameEpisodes.ps1` reads durations and chapter marks out of the
+files and works out what each one is:
+
+```bash
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01                  # dry run
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute         # apply
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute  # cut Play Alls up
+```
+
+It numbers what's left over, continuing from the highest `E##` already in
+the folder, and sets aside what isn't an episode: a title ripped twice, a
+Play All whose episodes all exist on their own, a standalone episode that a
+Play All also holds (that file keeps the number, the Play All's copy of it
+goes to `_extra\`). Episode numbers are only assigned where the arithmetic
+is decisive. A file far longer than the episodes around it — a Christmas
+special, or two episodes no rule could separate — is reported and left
+alone rather than numbered. Rename it `E09.mkv` or `E07-E08.mkv` by hand
+and the next run takes that as given. Nothing is ever deleted, every move
+goes to `rename-log.txt`, and dry run is the default.
+
+Run it per disc rather than once at the end of a season: title order is
+only meaningful within one disc.
 
 **Convert pending rips** — encodes any raw rip not yet converted, OCRs its
 subtitles, and attaches a TMDb poster:

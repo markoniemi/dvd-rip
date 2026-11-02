@@ -16,11 +16,20 @@
 #               titles (and their chapter counts add up), OR one of its
 #               chapters starts exactly where another title ends, meaning it
 #               begins with that whole title and continues past it.
-#   Episode   - whatever is left, numbered in title order.
+#   Episode   - whatever is left, numbered in title order, unless it is one
+#               block of a Play All (then it takes that block's number) or far
+#               longer than the episodes around it (then it's left alone: a
+#               Christmas special is not simply the next episode).
 #
 # Nothing is guessed silently: every verdict is printed with the arithmetic
 # behind it, and a title the rules can't explain is reported as Unknown and
 # left alone. Dry run by default - add -Execute to apply.
+#
+# "Far longer" is measured against the median of the episodes already pinned
+# down (MultiEpisodeRatio, 1.8x). That yardstick is only as good as what the
+# folder holds: name the earlier discs of a season first and it is solid, but in
+# a folder of three titles and nothing named yet it can be skewed by a long one.
+# The duration of every title is printed, so it can be checked by eye.
 #
 # Usage:
 #   .\NameEpisodes.ps1 -DirName The_Crown_S01                   # dry run
@@ -58,6 +67,7 @@ $cfg = Get-RipConfig @{
     MkvExtract_Exe     = "C:\Program Files\MKVToolNix\mkvextract.exe"
     MinEpisodeSeconds  = 900    # 15 min - shorter than this isn't an episode
     MaxEpisodeSeconds  = 6000   # 100 min - longer than this is a Play All, not an episode
+    MultiEpisodeRatio  = 1.8    # this many times the typical episode here = not one episode
     DurationToleranceSeconds = 3
     StableSeconds      = 30     # ignore files a rip is still writing
 }
@@ -66,6 +76,7 @@ $MkvMerge_Exe      = $cfg.MkvMerge_Exe
 $MkvExtract_Exe    = $cfg.MkvExtract_Exe
 $MinEpisodeSeconds = $cfg.MinEpisodeSeconds
 $MaxEpisodeSeconds = $cfg.MaxEpisodeSeconds
+$MultiEpisodeRatio = $cfg.MultiEpisodeRatio
 $Tolerance         = $cfg.DurationToleranceSeconds
 $StableSeconds     = $cfg.StableSeconds
 
@@ -169,18 +180,80 @@ function Test-AllEpisodeLength($lengths) {
     return (@($lengths | Where-Object { -not (Test-EpisodeLength $_) }).Count -eq 0)
 }
 
+# The chapter blocks a Play All is made of, once its split points are known:
+# one per episode, with the chapter marks inside it rebased to start at zero so
+# they can be compared against a title ripped on its own.
+function Get-PlayAllBlocks($item) {
+    if (-not $item.SplitAt) { return @() }
+
+    $bounds = @(1) + @($item.SplitAt)
+    $blocks = @()
+    for ($i = 0; $i -lt $bounds.Count; $i++) {
+        $firstCh = $bounds[$i]
+        $lastCh = if ($i -eq $bounds.Count - 1) { $item.Facts.Chapters } else { $bounds[$i + 1] - 1 }
+        $start = $item.Facts.ChapterStart[$firstCh - 1]
+        $end = if ($i -eq $bounds.Count - 1) { $item.Facts.Duration } else { $item.Facts.ChapterStart[$bounds[$i + 1] - 1] }
+
+        $blocks += [pscustomobject]@{
+            Index    = $i
+            FirstCh  = $firstCh
+            LastCh   = $lastCh
+            Chapters = $lastCh - $firstCh + 1
+            Duration = $end - $start
+            Marks    = @($item.Facts.ChapterStart[($firstCh - 1)..($lastCh - 1)] | ForEach-Object { $_ - $start })
+        }
+    }
+    return $blocks
+}
+
+# Is this title the same content as one block of a Play All - the standalone rip
+# of an episode sitting next to the Play All that also holds it? As with
+# Test-SameTitle, length and chapter count prove nothing by themselves, so the
+# chapter marks within the block have to line up too. File size can't be
+# compared here: the block hasn't been cut out yet.
+function Test-SameBlock($item, $block) {
+    if ($item.Facts.Chapters -ne $block.Chapters) { return $false }
+    if ([math]::Abs($item.Facts.Duration - $block.Duration) -gt $Tolerance) { return $false }
+
+    for ($i = 0; $i -lt $block.Marks.Count; $i++) {
+        if ([math]::Abs($item.Facts.ChapterStart[$i] - $block.Marks[$i]) -gt 0.5) { return $false }
+    }
+    return $true
+}
+
+# The length to judge "too long to be one episode" against: the median of the
+# episodes already pinned down. Named files count, so on the second disc of a
+# season the earlier discs set the yardstick; failing that, the episode-length
+# titles on this disc do.
+function Get-MedianEpisodeLength($all) {
+    $lengths = @($all | Where-Object { $_.Kind -eq "Episode" } | ForEach-Object { $_.Facts.Duration })
+    if ($lengths.Count -eq 0) {
+        $lengths = @($all | Where-Object { -not $_.Kind -and (Test-EpisodeLength $_.Facts.Duration) } |
+            ForEach-Object { $_.Facts.Duration })
+    }
+    if ($lengths.Count -eq 0) { return $null }
+
+    $sorted = @($lengths | Sort-Object)
+    return $sorted[[int][math]::Floor($sorted.Count / 2)]
+}
+
 # Where to cut a file named for a range of episodes. E01-E03 with 18 chapters
 # is three blocks of 6, so split at 7 and 13. But the chapters don't always
 # divide evenly - a feature-length opener carries more of them (Downton Abbey
 # season 3 opens with 8 chapters, then 6 and 6, for 20 in all). In that case,
 # if one of the episodes already exists on its own and this file opens with it,
 # peel that off at the chapter where it ends and divide the rest evenly.
-# Returns the 1-based chapter numbers to split before, or $null.
+# Returns @{ SplitAt = <1-based chapter numbers to split before>; Why = <text> },
+# or $null. An anchor is tried before an even division of the chapters: a
+# chapter mark landing on another title's exact duration is evidence, while
+# dividing 14 chapters into 7 + 7 is a guess that only has to come out
+# episode-length to pass - and on Downton Abbey season 3 that guess cuts a
+# 6 + 8 chapter file in the wrong place, five minutes into episode two.
 function Get-RangeSplit($item, $all, [int]$count) {
     if ($count -lt 2) { return $null }
 
     $uniform = Get-UniformChapterSplit $item.Facts.Chapters $count
-    if ($uniform -and (Test-AllEpisodeLength (Get-BlockLengths $item.Facts $uniform))) { return $uniform }
+    $uniformFits = ($uniform -and (Test-AllEpisodeLength (Get-BlockLengths $item.Facts $uniform)))
 
     foreach ($other in $all) {
         if ($other -eq $item -or $other.Facts.Chapters -ge $item.Facts.Chapters) { continue }
@@ -203,7 +276,48 @@ function Get-RangeSplit($item, $all, [int]$count) {
         $splitAt = @($anchor)
         for ($b = 1; $b -lt ($count - 1); $b++) { $splitAt += ($anchor + ($b * $per)) }
 
-        if (Test-AllEpisodeLength (Get-BlockLengths $item.Facts $splitAt)) { return $splitAt }
+        if (-not (Test-AllEpisodeLength (Get-BlockLengths $item.Facts $splitAt))) { continue }
+
+        $why = "chapter $anchor starts where $($other.File.Name) ends"
+        if ($uniformFits -and (($uniform -join ',') -ne ($splitAt -join ','))) {
+            $why += ", so ch $($splitAt -join ',') rather than an even ch $($uniform -join ',')"
+        }
+        return [pscustomobject]@{ SplitAt = $splitAt; Why = $why }
+    }
+
+    # The same evidence from the other end: a chapter mark with exactly another
+    # title's length left after it means this file ENDS with the whole of that
+    # title, which is the usual shape of a Play All running up to the last
+    # episode on the disc. The chapters before the mark then divide evenly.
+    foreach ($other in $all) {
+        if ($other -eq $item -or $other.Facts.Chapters -ge $item.Facts.Chapters) { continue }
+
+        $anchor = $null
+        for ($c = 1; $c -lt $item.Facts.ChapterStart.Count; $c++) {
+            if ([math]::Abs(($item.Facts.Duration - $item.Facts.ChapterStart[$c]) - $other.Facts.Duration) -le $Tolerance -and
+                ($item.Facts.Chapters - $c) -eq $other.Facts.Chapters) {
+                $anchor = $c + 1
+                break
+            }
+        }
+        if (-not $anchor) { continue }
+
+        $front = $anchor - 1
+        if (($front % ($count - 1)) -ne 0) { continue }
+        $per = $front / ($count - 1)
+
+        $splitAt = @(1..($count - 1) | ForEach-Object { 1 + ($_ * $per) })
+        if (-not (Test-AllEpisodeLength (Get-BlockLengths $item.Facts $splitAt))) { continue }
+
+        $why = "it ends with the whole of $($other.File.Name), which starts at chapter $anchor"
+        if ($uniformFits -and (($uniform -join ',') -ne ($splitAt -join ','))) {
+            $why += ", so ch $($splitAt -join ',') rather than an even ch $($uniform -join ',')"
+        }
+        return [pscustomobject]@{ SplitAt = $splitAt; Why = $why }
+    }
+
+    if ($uniformFits) {
+        return [pscustomobject]@{ SplitAt = $uniform; Why = "$($item.Facts.Chapters) chapters divide evenly into $count" }
     }
 
     return $null
@@ -272,13 +386,15 @@ foreach ($item in $items) {
     # chapter boundaries from it.
     if ($item.Tag.Last -gt $item.Tag.First) {
         $count = $item.Tag.Last - $item.Tag.First + 1
-        $splitAt = Get-RangeSplit $item $items $count
-        if (-not $splitAt) {
+        # Not $split: that would assign to the [switch]$Split parameter, which
+        # PowerShell matches case-insensitively and then refuses to convert.
+        $rangeSplit = Get-RangeSplit $item $items $count
+        if (-not $rangeSplit) {
             $item.Evidence += "; $($item.Facts.Chapters) chapters don't resolve into $count episode-length blocks, so it can't be split"
         } else {
-            $lengths = Get-BlockLengths $item.Facts $splitAt
-            $item.SplitAt = $splitAt
-            $item.Evidence += "; cut at ch $($splitAt -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
+            $lengths = Get-BlockLengths $item.Facts $rangeSplit.SplitAt
+            $item.SplitAt = $rangeSplit.SplitAt
+            $item.Evidence += "; $($rangeSplit.Why), cut at ch $($rangeSplit.SplitAt -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
         }
     }
 }
@@ -290,8 +406,12 @@ foreach ($item in $unnamed) {
     foreach ($other in $items) {
         if ($other -eq $item -or $other.Kind -eq "Duplicate") { continue }
         if (Test-SameTitle $item $other) {
-            # Keep the first one in title order, flag this as the copy.
-            if ($items.IndexOf($other) -lt $items.IndexOf($item)) {
+            # Keep the first one in title order, flag this as the copy. A file
+            # already named E## always wins, whatever the order: it has no title
+            # index left to sort by, so it lands at the end of the list, and
+            # without this an unnamed copy of an episode named on an earlier disc
+            # would be numbered as a new episode instead of being parked.
+            if ($other.Tag -or $items.IndexOf($other) -lt $items.IndexOf($item)) {
                 $item.Kind = "Duplicate"
                 $item.Evidence = "same chapter marks and size as $($other.File.Name)"
                 break
@@ -399,15 +519,53 @@ foreach ($item in @($items | Where-Object { -not $_.Kind })) {
     }
 }
 
+# One episode OUT OF a Play All: the same content the Play All holds between two
+# of its chapter marks. This is the standalone rip of an episode sitting beside
+# a Play All named for its range, and without this rule it would be numbered as
+# a brand new episode - leaving the season holding that episode twice, under two
+# numbers, with the right number given to the wrong file.
+foreach ($playall in @($items | Where-Object { $_.Kind -eq "PlayAll" -and $_.SplitAt -and $_.Episodes.Count -gt 1 })) {
+    $blocks = Get-PlayAllBlocks $playall
+    if ($blocks.Count -ne $playall.Episodes.Count) { continue }
+
+    foreach ($item in @($items | Where-Object { -not $_.Kind })) {
+        foreach ($block in $blocks) {
+            if (-not (Test-SameBlock $item $block)) { continue }
+
+            $ep = $playall.Episodes[$block.Index]
+            $item.Kind = "Episode"
+            $item.Episodes = @($ep)
+            $item.Evidence = ("chapters {0}-{1} of {2}, mark for mark - that block is E{3:D2}" -f `
+                $block.FirstCh, $block.LastCh, $playall.File.Name, $ep)
+            break
+        }
+    }
+}
+
 # Anything left that is episode-length is an episode; anything else is beyond
 # these rules and gets left alone.
+$median = Get-MedianEpisodeLength $items
 foreach ($item in @($items | Where-Object { -not $_.Kind })) {
-    if (Test-EpisodeLength $item.Facts.Duration) {
-        $item.Kind = "Episode"
-    } else {
+    if (-not (Test-EpisodeLength $item.Facts.Duration)) {
         $item.Kind = "Unknown"
         $item.Evidence = "$(Format-Length $item.Facts.Duration) is outside episode length, and no run of titles adds up to it"
+        continue
     }
+
+    # Episode-length in absolute terms, but far longer than the episodes around
+    # it: a Christmas special, a feature-length finale, or two episodes the Play
+    # All rules couldn't resolve. Downton Abbey's 1:32 specials sit on their own
+    # disc next to 47 minute episodes, and numbering one E07 because it happens
+    # to come next in title order is exactly the silent guess this script exists
+    # to avoid.
+    if ($median -and $item.Facts.Duration -gt ($median * $MultiEpisodeRatio)) {
+        $item.Kind = "Unknown"
+        $item.Evidence = ("{0} is {1:N1}x the {2} typical episode here, and no Play All reading fits - rename it by hand: E<nn>.mkv if it really is one episode (a special, a feature-length finale), E<first>-E<last>.mkv if it holds several" -f `
+            (Format-Length $item.Facts.Duration), ($item.Facts.Duration / $median), (Format-Length $median))
+        continue
+    }
+
+    $item.Kind = "Episode"
 }
 
 # ------------------------------------------------------- assign episode numbers
@@ -578,8 +736,14 @@ foreach ($item in $items) {
             $ep = $item.Episodes[$i]
             $len = if ($i -lt $lengths.Count) { Format-Length $lengths[$i] } else { "?" }
             $epPath = Join-Path $SeasonDir ("E{0:D2}.mkv" -f $ep)
+            # That episode may already be here under its own name, or be about to
+            # be: a title of its own that this run numbered. Either way the piece
+            # cut out of the Play All is a second copy and gets parked.
+            $ownFile = @($items | Where-Object { $_.Kind -eq "Episode" -and $_.Episodes -contains $ep })
             if (Test-Path -LiteralPath $epPath) {
-                Write-Host ("   part {0} ({1}) -> E{2:D2}.mkv already exists, skipping that piece" -f ($i + 1), $len, $ep)
+                Write-Host ("   part {0} ({1}) -> E{2:D2}.mkv already exists, that piece goes to _extra" -f ($i + 1), $len, $ep)
+            } elseif ($ownFile) {
+                Write-Host ("   part {0} ({1}) -> _extra; E{2:D2}.mkv comes from {3}" -f ($i + 1), $len, $ep, $ownFile[0].File.Name)
             } else {
                 Write-Host ("   part {0} ({1}) -> E{2:D2}.mkv" -f ($i + 1), $len, $ep)
             }
@@ -605,6 +769,13 @@ if (-not $actions) {
     Write-Host "Nothing to do."
     exit 0
 }
+
+# Renames first, splits last. A split writes E<nn>.mkv for every block it can't
+# find an owner for, so if it ran before the rename of the title that owns that
+# episode, the rename would then land on a file that exists. (Sort-Object has no
+# -Stable on PowerShell 5.1, hence the two passes.)
+$splitFirst = { param($i) $i.Kind -eq "PlayAll" -and $Split -and $i.SplitAt }
+$actions = @($actions | Where-Object { -not (& $splitFirst $_) }) + @($actions | Where-Object { & $splitFirst $_ })
 
 if (-not $Execute) {
     Write-Host ""

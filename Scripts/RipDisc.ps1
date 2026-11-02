@@ -83,14 +83,44 @@ function Get-DiscTitles($infoLines) {
     }
 }
 
-# Renames freshly ripped files to E<nn>.mkv in title order, starting at
-# $firstEpisode. Files already named E<nn>.mkv (earlier discs of the same
-# season) are left alone.
-function Rename-Episodes($folder, $firstEpisode) {
+# MakeMKV names its output after the disc volume label, "C1_t00.mkv". Discs of
+# one season often carry the SAME label, so disc 2 would write t00.mkv straight
+# over disc 1's, with no warning. So each rip goes into its own staging folder
+# and is moved up afterwards - a rename on the same volume, so no copying - and
+# a name already taken gets a disc counter inserted: C1_d2_t00.mkv. The counter
+# goes before the _tNN part, because that suffix is what NameEpisodes.ps1 reads
+# the title order from.
+function Move-RippedFiles($stageFolder, $folder) {
+    $moved = @()
+
+    foreach ($file in (Get-ChildItem -Path $stageFolder -Filter "*.mkv" -File | Sort-Object Name)) {
+        $newName = $file.Name
+        $disc = 1
+        while (Test-Path (Join-Path $folder $newName)) {
+            $disc++
+            $newName = if ($file.BaseName -match '^(.*?)(_t\d+)$') {
+                "{0}_d{1}{2}{3}" -f $Matches[1], $disc, $Matches[2], $file.Extension
+            } else {
+                "{0}_d{1}{2}" -f $file.BaseName, $disc, $file.Extension
+            }
+        }
+
+        Move-Item -LiteralPath $file.FullName -Destination (Join-Path $folder $newName)
+        if ($newName -ne $file.Name) { Write-Host " $($file.Name) -> $newName (name taken by an earlier disc)" }
+        $moved += Get-Item -LiteralPath (Join-Path $folder $newName)
+    }
+
+    return $moved
+}
+
+# Renames this run's files to E<nn>.mkv in title order, starting at
+# $firstEpisode. Only the files passed in are touched: earlier discs may have
+# left unrenamed titles in the folder, and those are not this disc's episodes.
+function Rename-Episodes($folder, $files, $firstEpisode) {
     $episode = $firstEpisode
     $renamed = @()
 
-    foreach ($file in (Get-ChildItem -Path $folder -Filter "*.mkv" -File | Sort-Object Name)) {
+    foreach ($file in ($files | Sort-Object Name)) {
         if (Get-EpisodeTag $file.BaseName) { continue }
 
         $newName = "E{0:D2}.mkv" -f $episode
@@ -177,28 +207,44 @@ if ($DiscTitles) {
 Write-Host " Starting Disc Extraction via MakeMKV..."
 Write-Host " Raw output folder: $DiscFolder"
 
+# Rip into a staging folder so this disc's output can never overwrite an
+# earlier disc's, and so "did this rip produce anything" is answerable in a
+# folder that already holds other discs. A subfolder is invisible to
+# ConvertNext.ps1 and NameEpisodes.ps1, which both look at top-level files only.
+$StageFolder = Join-Path $DiscFolder "_rip"
+if (Test-Path $StageFolder) { Remove-Item -Path $StageFolder -Force -Recurse }
+New-Item -ItemType Directory -Path $StageFolder | Out-Null
+
 # Extract the main feature
-& $MakeMKV_Exe mkv disc:0 all $DiscFolder --minlength=$MinLengthSeconds
+& $MakeMKV_Exe mkv disc:0 all $StageFolder --minlength=$MinLengthSeconds
 
-$RippedFiles = Get-ChildItem -Path $DiscFolder -Filter "*.mkv" -File
-
-if (-not $RippedFiles) {
+if (-not (Get-ChildItem -Path $StageFolder -Filter "*.mkv" -File)) {
     Write-Host "Error: No main feature found matching criteria."
+    Remove-Item -Path $StageFolder -Force -Recurse -ErrorAction SilentlyContinue
     # Only throw the folder away if this run created it - with -Title it may
     # hold earlier discs of the same season.
     if ($FolderCreated) { Remove-Item -Path $DiscFolder -Force -Recurse -ErrorAction SilentlyContinue }
     exit 1
 }
 
+$RippedFiles = @(Move-RippedFiles $StageFolder $DiscFolder)
+Remove-Item -Path $StageFolder -Force -Recurse -ErrorAction SilentlyContinue
+
 if ($Index -gt 0) {
     Write-Host "====================================================="
     Write-Host (" Renaming episodes, starting at E{0:D2}:" -f $Index)
-    $Renamed = Rename-Episodes $DiscFolder $Index
+    $Renamed = @(Rename-Episodes $DiscFolder $RippedFiles $Index)
     if (-not $Renamed) { Write-Host " Nothing to rename." }
-    $RippedFiles = Get-ChildItem -Path $DiscFolder -Filter "*.mkv" -File
+
+    # What this disc produced, under the names it ended up with: the new E<nn>
+    # files plus anything the rename stopped short of.
+    $RippedFiles = @($Renamed | ForEach-Object { Get-Item -LiteralPath (Join-Path $DiscFolder $_) }) +
+                   @($RippedFiles | Where-Object { Test-Path -LiteralPath $_.FullName })
 }
 
 Write-Host "====================================================="
-Write-Host " Rip completed successfully! Folder now contains:"
-foreach ($f in ($RippedFiles | Sort-Object Name)) { Write-Host " - $($f.FullName)" }
+Write-Host " Rip completed successfully! This disc produced:"
+foreach ($f in ($RippedFiles | Sort-Object Name)) { Write-Host " - $($f.Name)" }
+Write-Host " Folder now contains:"
+foreach ($f in (Get-ChildItem -Path $DiscFolder -Filter "*.mkv" -File | Sort-Object Name)) { Write-Host " - $($f.FullName)" }
 Write-Host "====================================================="
