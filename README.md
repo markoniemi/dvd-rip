@@ -124,6 +124,22 @@ files and works out what each one is:
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute  # cut Play Alls up
 ```
 
+Where a range-named file's chapters settle nothing — Downton Abbey season
+4 disc 1 is 20 chapters holding three episodes, which no even division
+fits and no other title on the disc anchors — give the cut points
+yourself, as the chapters to cut *before*:
+
+```bash
+.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt 9,15
+.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt "E01-E03=9,15","E07-E08=7"
+```
+
+`-SplitAt` overrides whatever the script worked out. Without a file name
+it applies to the one range-named file that needs it, and says which files
+it could have meant rather than picking. The chapter numbers are taken as
+given — only impossible ones are refused — so the plan is worth reading
+before adding `-Execute`.
+
 It numbers what's left over, continuing from the highest `E##` already in
 the folder, and sets aside what isn't an episode: a title ripped twice, a
 Play All whose episodes all exist on their own, a standalone episode that a

@@ -37,6 +37,15 @@
 #   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5          # first episode is 5
 #   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute   # cut Play Alls into episodes
 #   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work     # look under I:\Work, not VideoRoot
+#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -SplitAt 9,15     # cut there, don't work it out
+#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -SplitAt "E01-E03=9,15","E07-E08=7"
+#
+# -SplitAt is the last word on where a range-named file is cut, for the discs
+# whose chapters the arithmetic can't settle: Downton Abbey season 4 disc 1 is
+# 20 chapters holding three episodes, which no even division fits and no other
+# title on the disc anchors. Give the chapter numbers to cut BEFORE. Without a
+# file name it applies to the one range-named file that needs it, and says so
+# rather than guessing when several could.
 #
 # Without -Index the first episode number continues from the highest E## file
 # already in the folder, so the next disc of a season needs no argument.
@@ -57,6 +66,7 @@ param(
     [int]$Index = 0,
     [switch]$Split,
     [switch]$Execute,
+    [string[]]$SplitAt,  # chapters to cut a range-named file at: "9,15" or "E01-E03=9,15"
     [string]$Root        # look under this instead of VideoRoot (a staging folder)
 )
 
@@ -219,6 +229,67 @@ function Test-SameBlock($item, $block) {
         if ([math]::Abs($item.Facts.ChapterStart[$i] - $block.Marks[$i]) -gt 0.5) { return $false }
     }
     return $true
+}
+
+# -SplitAt, as a map of file name (or "" for the unqualified form) to chapter
+# numbers. The whole argument is re-joined and re-split on commas first, so
+# -SplitAt 9,15 and -SplitAt "E01-E03=9,15","E07-E08=7" both come out right
+# whether or not PowerShell split the list on the commas itself.
+function Get-SplitOverrides([string[]]$spec) {
+    $map = [ordered]@{}
+    $key = ""
+
+    foreach ($token in (($spec -join ',') -split ',')) {
+        $token = $token.Trim()
+        if (-not $token) { continue }
+
+        if ($token -match '^(?<name>.+?)=(?<chapter>\d+)$') {
+            $key = $Matches.name.Trim()
+            $chapter = [int]$Matches.chapter
+        } elseif ($token -match '^\d+$') {
+            $chapter = [int]$token
+        } else {
+            Write-Host "Error: -SplitAt takes chapter numbers, optionally prefixed with a file name: 9,15 or `"E01-E03=9,15`". Can't read: $token"
+            exit 1
+        }
+
+        if (-not $map.Contains($key)) { $map[$key] = @() }
+        $map[$key] += $chapter
+    }
+    return $map
+}
+
+# Apply one -SplitAt entry to a range-named file. The chapters are the human's
+# word, so they are used as given; only what cannot possibly work is refused,
+# and a block that comes out an odd length is reported rather than rejected.
+function Set-ExplicitSplit($item, $chapters) {
+    $expected = $item.Tag.Last - $item.Tag.First
+    if ($chapters.Count -ne $expected) {
+        Write-Host ("Error: {0} holds {1} episodes, so -SplitAt needs {2} chapter number(s), not {3}: {4}" -f `
+            $item.File.Name, ($expected + 1), $expected, $chapters.Count, ($chapters -join ','))
+        exit 1
+    }
+
+    for ($i = 0; $i -lt $chapters.Count; $i++) {
+        if ($chapters[$i] -lt 2 -or $chapters[$i] -gt $item.Facts.Chapters) {
+            Write-Host ("Error: {0} has {1} chapters, so {2} can't be a cut point (2..{1})." -f `
+                $item.File.Name, $item.Facts.Chapters, $chapters[$i])
+            exit 1
+        }
+        if ($i -gt 0 -and $chapters[$i] -le $chapters[$i - 1]) {
+            Write-Host ("Error: -SplitAt chapters must increase: $($chapters -join ',')")
+            exit 1
+        }
+    }
+
+    $lengths = Get-BlockLengths $item.Facts $chapters
+    $item.SplitAt = $chapters
+    $item.Evidence = "already named $($item.Tag.Tag); -SplitAt ch $($chapters -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
+
+    $odd = @($lengths | Where-Object { -not (Test-EpisodeLength $_) })
+    if ($odd) {
+        $item.Evidence += " - note $(($odd | ForEach-Object { Format-Length $_ }) -join ', ') isn't episode length"
+    }
 }
 
 # The length to judge "too long to be one episode" against: the median of the
@@ -396,6 +467,40 @@ foreach ($item in $items) {
             $item.SplitAt = $rangeSplit.SplitAt
             $item.Evidence += "; $($rangeSplit.Why), cut at ch $($rangeSplit.SplitAt -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
         }
+    }
+}
+
+# Explicit cut points beat anything worked out above.
+if ($SplitAt) {
+    $overrides = Get-SplitOverrides $SplitAt
+    $ranges = @($items | Where-Object { $_.Tag -and $_.Tag.Last -gt $_.Tag.First })
+
+    foreach ($key in @($overrides.Keys | Where-Object { $_ -ne "" })) {
+        $match = @($ranges | Where-Object { $_.File.BaseName -ieq $key -or $_.File.Name -ieq $key })
+        if ($match.Count -ne 1) {
+            Write-Host "Error: -SplitAt names '$key', which isn't one range-named file here. Range-named files: $(($ranges | ForEach-Object { $_.File.BaseName }) -join ', ')"
+            exit 1
+        }
+        Set-ExplicitSplit $match[0] $overrides[$key]
+    }
+
+    if ($overrides.Contains("")) {
+        # No file named, so it has to be obvious which one is meant: the only
+        # range-named file, or the only one the arithmetic couldn't settle.
+        $unsettled = @($ranges | Where-Object { -not $_.SplitAt })
+        $target = if ($unsettled.Count -eq 1) {
+            $unsettled[0]
+        } elseif ($ranges.Count -eq 1) {
+            $ranges[0]
+        } else {
+            $null
+        }
+
+        if (-not $target) {
+            Write-Host "Error: -SplitAt $($overrides['' ] -join ',') doesn't say which file to cut, and there are $($ranges.Count) range-named files here: $(($ranges | ForEach-Object { $_.File.BaseName }) -join ', '). Write it as -SplitAt `"<file>=$($overrides[''] -join ',')`"."
+            exit 1
+        }
+        Set-ExplicitSplit $target $overrides[""]
     }
 }
 
