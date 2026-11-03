@@ -57,7 +57,35 @@ Copy-Item Scripts\config.example.json Scripts\config.json
 
 Edit `Scripts\config.json` and change only the keys you need — anything
 you leave out keeps its script default. `config.json` is gitignored (it's
-machine-specific), so this never gets committed.
+machine-specific), so this never gets committed. Every key, and the script
+default it replaces:
+
+| Key | Default | What it does |
+|---|---|---|
+| `VideoRoot` | `I:\Video` | Raw rips land in a subfolder here; converted files are written flat in it |
+| `DriveLetter` | `J:` | The disc drive `RipDisc.ps1` reads |
+| `MinLengthSeconds` | `3600` | MakeMKV `--minlength`. Drop to ~`1200` for TV, or 47-minute episodes are skipped |
+| `MakeMKV_Exe` | `…\MakeMKV\makemkvcon64.exe` | Ripper |
+| `HandBrake_Exe` | `…\HandBrake\HandBrakeCLI.exe` | H.265 encoder |
+| `Seconv_Exe` | `…\Subtitle Edit\seconv.exe` | Subtitle OCR CLI |
+| `MkvMerge_Exe` | `…\MKVToolNix\mkvmerge.exe` | Remux, and the chapter split in `NameEpisodes.ps1` |
+| `MkvExtract_Exe` | `…\MKVToolNix\mkvextract.exe` | Reads chapter marks for `NameEpisodes.ps1` |
+| `MkvPropEdit_Exe` | `…\MKVToolNix\mkvpropedit.exe` | Attaches the poster |
+| `TesseractDir` | `…\Tesseract-OCR` | Added to `PATH` so `seconv` can shell out to it |
+| `TmdbApiKeyFile` | `Scripts\tmdb_api_key.txt` | Where the TMDb key is read from (absolute path if you move it) |
+| `StableSeconds` | `30` | Ignore files written more recently than this — a rip still running |
+| `DefaultOcrLanguage` | `fin` | OCR language for a subtitle track tagged `und` or nothing |
+| `AudioLanguages` | `fin,eng,jpn` | HandBrake `--audio-lang-list` |
+| `SubtitleLanguages` | `fin,eng` | HandBrake `--subtitle-lang-list` |
+| `MinEpisodeSeconds` | `900` | `NameEpisodes.ps1`: shorter than this is not an episode |
+| `MaxEpisodeSeconds` | `6000` | `NameEpisodes.ps1`: longer than this is a Play All, not an episode |
+| `MultiEpisodeRatio` | `1.8` | `NameEpisodes.ps1`: this many times the folder's median episode (or that fraction of it) is reported rather than numbered |
+| `DurationToleranceSeconds` | `3` | `NameEpisodes.ps1`: how far two durations may differ and still count as equal |
+
+`config.example.json` carries all of these except `TmdbApiKeyFile` (add that
+one only if you keep the key somewhere else, as an absolute path), and has
+`MinLengthSeconds` already lowered to `3000`. Keys a script doesn't know are
+ignored, so one `config.json` serves the whole pipeline.
 
 ## 4. Running the scripts
 
@@ -189,13 +217,23 @@ Useful flags:
 
 ```bash
 .\Scripts\ConvertNext.ps1 -Watch                # keep polling for new raw folders
+.\Scripts\ConvertNext.ps1 -Watch -PollSeconds 300  # how long -Watch waits between looks (default 60)
 .\Scripts\ConvertNext.ps1 -Only "Kiki"          # restrict to one raw subfolder
 .\Scripts\ConvertNext.ps1 -SkipSubtitles        # H.265 encode only, no OCR
+.\Scripts\ConvertNext.ps1 -ReplaceBitmapSubs    # keep only the OCR'd SRT, drop the bitmap tracks
 .\Scripts\ConvertNext.ps1 -SkipPoster           # don't fetch/attach a poster
 .\Scripts\ConvertNext.ps1 -FetchPoster "Kiki"   # (re)fetch poster only, pass "all" for every converted file
+.\Scripts\ConvertNext.ps1 -FetchPoster "Kiki" -Title "Kiki's Delivery Service"   # ...searching TMDb for this, not the folder name
 .\Scripts\ConvertNext.ps1 -RedoSubtitles "Kiki" # redo OCR+remux, pass "all" for every converted file
 .\Scripts\ConvertNext.ps1 -MarkDone "Kiki"      # mark a folder converted without encoding
 ```
+
+By default the OCR'd SRT tracks are added *alongside* the original bitmap
+(VobSub) ones, so nothing is lost; `-ReplaceBitmapSubs` drops the bitmaps
+and keeps the text. `-Title` only applies to `-FetchPoster` — it is the TMDb
+search term, for when the folder name isn't the film's title. In a normal
+convert run the folder name is used, and so is any jpg/png already sitting
+in the raw folder (see `FetchPosterPreview.ps1` below).
 
 **Preview posters before converting** — fetch a TMDb candidate into every
 raw disc folder that doesn't already have one, so you can check (or swap)

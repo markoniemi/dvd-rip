@@ -12,5 +12,9 @@
   "StableSeconds": 30,
   "DefaultOcrLanguage": "fin",
   "AudioLanguages": "fin,eng,jpn",
-  "SubtitleLanguages": "fin,eng"
+  "SubtitleLanguages": "fin,eng",
+  "MinEpisodeSeconds": 900,
+  "MaxEpisodeSeconds": 6000,
+  "MultiEpisodeRatio": 1.8,
+  "DurationToleranceSeconds": 3
 }
