@@ -12,24 +12,37 @@
 #
 #   Duplicate - same duration (within tolerance) and chapter count as a title
 #               already accounted for.
-#   Play All  - its duration equals the sum of a run of consecutive other
-#               titles (and their chapter counts add up), OR one of its
-#               chapters starts exactly where another title ends, meaning it
+#   Play All  - it holds a run of the other titles end to end, every chapter
+#               mark of each lining up inside it; OR its duration equals the
+#               sum of a run of them and their chapter counts add up; OR one of
+#               its chapters starts exactly where another title ends, meaning it
 #               begins with that whole title and continues past it.
 #   Episode   - whatever is left, numbered in title order, unless it is one
-#               block of a Play All (then it takes that block's number) or far
+#               block of a Play All (then it takes that block's number), far
 #               longer than the episodes around it (then it's left alone: a
-#               Christmas special is not simply the next episode).
+#               Christmas special is not simply the next episode), or far
+#               shorter (a bonus feature that got past --minlength).
 #
 # Nothing is guessed silently: every verdict is printed with the arithmetic
 # behind it, and a title the rules can't explain is reported as Unknown and
 # left alone. Dry run by default - add -Execute to apply.
 #
-# "Far longer" is measured against the median of the episodes already pinned
-# down (MultiEpisodeRatio, 1.8x). That yardstick is only as good as what the
-# folder holds: name the earlier discs of a season first and it is solid, but in
-# a folder of three titles and nothing named yet it can be skewed by a long one.
-# The duration of every title is printed, so it can be checked by eye.
+# "Far longer" and "far shorter" are measured against the median of the episodes
+# already pinned down (MultiEpisodeRatio, 1.8x either way). That yardstick is
+# only as good as what the folder holds: name the earlier discs of a season
+# first and it is solid, but in a folder of three titles and nothing named yet
+# it can be skewed by a long one. The duration of every title is printed, so it
+# can be checked by eye.
+#
+# A name is not proof either. A file called E04.mkv is believed until the
+# arithmetic says otherwise - and a Play All numbered as an episode by
+# RipDisc.ps1 -Index is exactly what it catches: Downton Abbey season 5 arrived
+# with three of them sitting among the episodes, as E04, E08 and E12. A single
+# E## name is dropped when the file turns out to hold a run of the other titles
+# mark for mark, which frees that number again. Whatever can be doubted but not
+# disproved - a named episode much shorter than the rest, two numbers on one
+# title, a number with no file behind it - is printed under "--- check ---" and
+# left for the human.
 #
 # Usage:
 #   .\NameEpisodes.ps1 -DirName The_Crown_S01                   # dry run
@@ -229,6 +242,70 @@ function Test-SameBlock($item, $block) {
         if ([math]::Abs($item.Facts.ChapterStart[$i] - $block.Marks[$i]) -gt 0.5) { return $false }
     }
     return $true
+}
+
+# Does this title hold a run of the other titles, one after another? Proved
+# from the chapter marks, not from chapter counts: a title ripped on its own can
+# carry a last mark a fraction before its end - a tail chapter the Play All
+# swallows at the join - so three 7 mark titles come out as 19 marks rather than
+# 21, and a rule that adds chapter counts up misses it entirely. Returns the
+# 1-based chapter numbers to cut at, or $null.
+function Find-ContainedRun($item, $parts) {
+    if ($parts.Count -lt 2) { return $null }
+
+    $marks = $item.Facts.ChapterStart
+    $offset = 0.0
+    $splitAt = @()
+    $at = 0
+
+    foreach ($part in $parts) {
+        # Where this part begins inside the suspect. A chapter mark has to be
+        # sitting there; if the join isn't a chapter boundary, this isn't a Play
+        # All of these titles.
+        if ($offset -gt 0) {
+            $at = -1
+            for ($i = 0; $i -lt $marks.Count; $i++) {
+                if ([math]::Abs($marks[$i] - $offset) -le $Tolerance) { $at = $i; break }
+            }
+            if ($at -lt 0) { return $null }
+            $splitAt += ($at + 1)
+        }
+
+        # Every chapter mark of the part has to appear in the suspect, shifted
+        # by where the part begins - measured from the mark we just found, so
+        # the half-second slack at each join doesn't accumulate down the run.
+        foreach ($mark in $part.Facts.ChapterStart) {
+            if ($mark -ge ($part.Facts.Duration - 1)) { continue }   # the tail chapter at the join
+            $want = $marks[$at] + $mark
+            # .Count, not -not: a one-element array unwraps to its element, and
+            # the first mark of every part is 0.0, which is falsy.
+            if (@($marks | Where-Object { [math]::Abs($_ - $want) -le 0.5 }).Count -eq 0) { return $null }
+        }
+
+        $offset += $part.Facts.Duration
+    }
+
+    if ([math]::Abs($offset - $item.Facts.Duration) -gt $Tolerance) { return $null }
+    return $splitAt
+}
+
+# The same test against every consecutive run of the other titles; the first run
+# that checks out wins. A Play All is never a part of another one, whether its
+# name says so or an earlier round of this test found it out.
+function Find-PlayAllRun($item, $all) {
+    $others = @($all | Where-Object {
+        $_ -ne $item -and $_.Kind -ne "PlayAll" -and $_.Kind -ne "Duplicate" -and
+        -not ($_.Tag -and $_.Tag.Last -gt $_.Tag.First)
+    })
+
+    for ($i = 0; $i -lt $others.Count; $i++) {
+        for ($j = $i + 1; $j -lt $others.Count; $j++) {
+            $run = @($others[$i..$j])
+            $runSplit = Find-ContainedRun $item $run
+            if ($runSplit) { return [pscustomobject]@{ Run = $run; SplitAt = $runSplit } }
+        }
+    }
+    return $null
 }
 
 # -SplitAt, as a map of file name (or "" for the unqualified form) to chapter
@@ -443,8 +520,10 @@ foreach ($file in $files) {
 
 # --------------------------------------------------------------- classify them
 
-# Files already named E## / E##-E## are taken as given - the human named them,
-# and on a second disc of a season they're the episodes from earlier discs.
+# Files already named E## / E##-E## start out taken as given - the human named
+# them, and on a second disc of a season they're the episodes from earlier
+# discs. A single E## name is then checked against the other titles below, and
+# dropped if the arithmetic shows it's really a Play All.
 foreach ($item in $items) {
     if (-not $item.Tag) { continue }
     $item.Kind = if ($item.Tag.Last -gt $item.Tag.First) { "PlayAll" } else { "Episode" }
@@ -468,6 +547,25 @@ foreach ($item in $items) {
             $item.Evidence += "; $($rangeSplit.Why), cut at ch $($rangeSplit.SplitAt -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
         }
     }
+}
+
+$warnings = @()
+
+# A name is not proof. RipDisc.ps1 -Index numbers the files in title order, and
+# a disc's "Play All" title gets numbered along with everything else, so a file
+# called E04.mkv can be the whole first half of the disc. Downton Abbey season 5
+# arrived with three of them sitting among the episodes, as E04, E08 and E12.
+# Check every single-episode name against the other titles before believing it.
+foreach ($item in @($items | Where-Object { $_.Tag -and $_.Tag.First -eq $_.Tag.Last })) {
+    $found = Find-PlayAllRun $item $items
+    if (-not $found) { continue }
+
+    $item.Kind = "PlayAll"
+    $item.Covers = @($found.Run | ForEach-Object { $_.File.Name })
+    $item.SplitAt = $found.SplitAt
+    $item.Episodes = @()        # the name was wrong, so that number is free again
+    $item.Evidence = "named $($item.Tag.Tag), but holds $($item.Covers -join ' + ') mark for mark - a Play All, not one episode"
+    $warnings += "$($item.File.Name) is not episode $($item.Tag.First): it holds $($item.Covers -join ' + '), cut at ch $($found.SplitAt -join ','). Episode $('{0:D2}' -f $item.Tag.First) is free again."
 }
 
 # Explicit cut points beat anything worked out above.
@@ -525,7 +623,24 @@ foreach ($item in $unnamed) {
     }
 }
 
-# Play All, rule 1: duration equals the sum of a run of consecutive other
+# Play All, rule 1: it holds a run of the other titles end to end, proved mark
+# for mark. The strongest evidence there is, so it is tried before the rules
+# that reason from chapter counts - those are thrown off by a title whose last
+# chapter mark sits a fraction before its end, where the counts no longer add
+# up (season 5's discs are like that: 7 + 7 + 7 marks become 19, not 21, and
+# the chapter-count rules then read the Play All as two episodes instead of
+# three).
+foreach ($item in @($items | Where-Object { -not $_.Kind })) {
+    $found = Find-PlayAllRun $item $items
+    if (-not $found) { continue }
+
+    $item.Kind = "PlayAll"
+    $item.Covers = @($found.Run | ForEach-Object { $_.File.Name })
+    $item.SplitAt = $found.SplitAt
+    $item.Evidence = "holds $($item.Covers -join ' + ') mark for mark"
+}
+
+# Play All, rule 2: duration equals the sum of a run of consecutive other
 # titles, and the chapter counts add up too.
 $candidates = @($items | Where-Object { -not $_.Kind })
 foreach ($item in $candidates) {
@@ -557,7 +672,7 @@ foreach ($item in $candidates) {
     }
 }
 
-# Play All, rule 2: one of its chapters starts exactly where another title
+# Play All, rule 3: one of its chapters starts exactly where another title
 # ends, so it opens with that whole title and runs past it. The remainder is
 # then divided into equal chapter blocks, and accepted only if every block
 # comes out episode-length.
@@ -670,7 +785,38 @@ foreach ($item in @($items | Where-Object { -not $_.Kind })) {
         continue
     }
 
+    # The mirror image: far shorter than the episodes here. Most DVD bonus
+    # features fall under --minlength and are never ripped, but a 25 minute one
+    # gets through, and it is not episode anything (Downton Abbey season 5
+    # disc 3 carries one).
+    if ($median -and $item.Facts.Duration -lt ($median / $MultiEpisodeRatio)) {
+        $item.Kind = "Unknown"
+        $item.Evidence = ("{0} is {1:N1}x the {2} typical episode here - a bonus feature rather than an episode. Name it E<nn>.mkv by hand if it really is one, or move it out of the folder" -f `
+            (Format-Length $item.Facts.Duration), ($item.Facts.Duration / $median), (Format-Length $median))
+        continue
+    }
+
     $item.Kind = "Episode"
+}
+
+# Named singles the arithmetic can doubt but can't disprove. Nothing is moved on
+# the strength of these - they are said out loud and left alone.
+$namedSingles = @($items | Where-Object { $_.Kind -eq "Episode" -and $_.Tag -and $_.Tag.First -eq $_.Tag.Last })
+foreach ($item in $namedSingles) {
+    if ($median -and $item.Facts.Duration -lt ($median / $MultiEpisodeRatio)) {
+        $warnings += ("{0} is only {1}, against {2} for a typical episode here - check it is an episode and not a bonus feature." -f `
+            $item.File.Name, (Format-Length $item.Facts.Duration), (Format-Length $median))
+    }
+
+    foreach ($other in $namedSingles) {
+        # Once per pair, and only where the marks and the file size both match:
+        # two numbers on one episode means one of them belongs to a file that
+        # isn't here.
+        if ($namedSingles.IndexOf($other) -le $namedSingles.IndexOf($item)) { continue }
+        if (-not (Test-SameTitle $item $other)) { continue }
+        $warnings += ("{0} and {1} are the same title - same chapter marks, same size. One of those two numbers is wrong." -f `
+            $item.File.Name, $other.File.Name)
+    }
 }
 
 # ------------------------------------------------------- assign episode numbers
@@ -819,6 +965,33 @@ Write-Host "--- titles ---"
 foreach ($item in $items) {
     Write-Host (" {0,-16} {1}  {2,3} ch  {3,-9} {4}" -f `
         $item.File.Name, (Format-Length $item.Facts.Duration), $item.Facts.Chapters, $item.Kind, $item.Evidence)
+}
+
+# Numbers that will have no file once this plan has run. A Play All that was
+# numbered as an episode leaves one behind when it moves aside, and a season
+# with a hole in it reads as a missing episode in Plex, so say which numbers
+# and what would close the hole.
+$willExist = @($items | Where-Object { $_.Kind -eq "Episode" } | ForEach-Object { $_.Episodes[0] })
+foreach ($item in @($items | Where-Object { $_.Kind -eq "PlayAll" })) {
+    # A Play All kept whole under its range name covers those episodes too -
+    # ConvertNext.ps1 turns E01-E03.mkv into "<Show> - S01E01-E03.mkv", which
+    # Plex reads as all three. One about to be split covers them as well.
+    $keptWhole = $item.Target -and -not ($item.Target -like "$extraDir*")
+    if ($keptWhole -or ($Split -and $item.SplitAt)) { $willExist += $item.Episodes }
+}
+$willExist = @($willExist | Sort-Object -Unique)
+if ($willExist.Count -gt 0) {
+    $gaps = @(1..($willExist[-1]) | Where-Object { $willExist -notcontains $_ })
+    if ($gaps.Count -gt 0) {
+        $warnings += ("nothing will be named E{0} - the folder would run up to E{1:D2} with {2} hole{3} in it. Leave the gap if that episode is on a disc you haven't ripped yet; otherwise renumber the later files down by hand." -f `
+            (@($gaps | ForEach-Object { "{0:D2}" -f $_ }) -join ', E'), $willExist[-1], $gaps.Count, $(if ($gaps.Count -eq 1) { "" } else { "s" }))
+    }
+}
+
+if ($warnings) {
+    Write-Host ""
+    Write-Host "--- check ---"
+    foreach ($warning in $warnings) { Write-Host " ! $warning" }
 }
 
 Write-Host ""

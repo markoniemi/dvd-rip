@@ -122,6 +122,8 @@ files and works out what each one is:
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01                  # dry run
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute         # apply
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute  # cut Play Alls up
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5         # first episode is 5
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work    # look here, not in VideoRoot
 ```
 
 Where a range-named file's chapters settle nothing — Downton Abbey season
@@ -150,6 +152,18 @@ special, or two episodes no rule could separate — is reported and left
 alone rather than numbered. Rename it `E09.mkv` or `E07-E08.mkv` by hand
 and the next run takes that as given. Nothing is ever deleted, every move
 goes to `rename-log.txt`, and dry run is the default.
+
+A name already on a file is believed, but checked. `-Index` numbers a disc's
+Play All title along with the episodes, so `E04.mkv` can turn out to be the
+whole first half of the disc — Downton Abbey season 5 arrived with three of
+those among its episodes. A single `E##` name is dropped when the file is
+shown to hold a run of the other titles mark for mark, and that number goes
+back to being free. What can be doubted but not disproved is printed under
+`--- check ---` and left alone: an episode much shorter than the rest (a
+bonus feature that got past `MinLengthSeconds`), two numbers on one title,
+or a number with no file behind it. A gap is worth reading rather than
+closing blindly — it also appears when the missing episode is simply on a
+disc you haven't ripped yet.
 
 Run it per disc rather than once at the end of a season: title order is
 only meaningful within one disc.
