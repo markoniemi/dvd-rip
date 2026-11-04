@@ -226,7 +226,32 @@ Useful flags:
 .\Scripts\ConvertNext.ps1 -FetchPoster "Kiki" -Title "Kiki's Delivery Service"   # ...searching TMDb for this, not the folder name
 .\Scripts\ConvertNext.ps1 -RedoSubtitles "Kiki" # redo OCR+remux, pass "all" for every converted file
 .\Scripts\ConvertNext.ps1 -MarkDone "Kiki"      # mark a folder converted without encoding
+.\Scripts\ConvertNext.ps1 -ShowToolOutput       # also put the tools' own output on screen
 ```
+
+Between them HandBrake, seconv and mkvmerge print a few hundred lines per
+file, so that goes to a log beside the raw file — `E02.mkv.log`, appended
+to, one block per tool per run — and the console gets one line per step,
+with the encode percentage rewriting itself in place:
+
+```
+ Downton_Abbey_S06\E02.mkv -> Downton Abbey - S06E02.mkv
+   encode  18m04s, 1,80 GB -> 0,74 GB
+   subs    2 of 2 tracks OCR'd and remuxed, bitmap subs kept too
+   poster  poster.jpg attached
+   done    I:\Video\Downton Abbey - S06E02.mkv
+```
+
+A step that fails prints the tail of the log with it. `-ShowToolOutput`
+streams everything to the console as well.
+
+OCR covers the languages in `SubtitleLanguages` — the same ones HandBrake
+keeps, since an SRT for a track that isn't in the output is just a slow way
+to produce nothing. Each needs its Tesseract data file: with only
+`eng.traineddata` and `fin.traineddata` installed, `seconv` cannot address a
+Danish or Dutch track at all (it reports "No subtitle tracks matched", which
+says nothing about the real cause), so the script checks for the file first
+and names what's missing.
 
 By default the OCR'd SRT tracks are added *alongside* the original bitmap
 (VobSub) ones, so nothing is lost; `-ReplaceBitmapSubs` drops the bitmaps

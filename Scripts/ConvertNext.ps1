@@ -53,6 +53,19 @@
 #   .\ConvertNext.ps1 -FetchPoster "Kiki"   # (re)fetch the poster for an already-
 #                                           # converted file without touching video/
 #                                           # subs. Pass "all" to backfill every one.
+#   .\ConvertNext.ps1 -ShowToolOutput       # also put the tools' own output on screen
+#
+# Console output is one line per step - encode, subs, poster, done - with a
+# percentage that rewrites itself in place while HandBrake runs. Everything the
+# tools print goes to a log beside the raw file instead ("E02.mkv.log"), which
+# is appended to, one block per tool per run. When a step fails, the tail of
+# that log is printed with it. -ShowToolOutput streams the lot to the console as
+# well, as earlier versions did.
+#
+# Subtitle OCR covers the languages in SubtitleLanguages, which is also what
+# HandBrake keeps - OCRing a track that won't be in the output is just slow -
+# and each needs its Tesseract data file ("fin.traineddata"), without which
+# seconv can't address the track at all.
 #
 # Poster images: if a .jpg/.jpeg/.png is sitting in the raw disc folder, that
 # wins and gets used as-is (drop one there by hand to fix a bad TMDb guess
@@ -77,7 +90,8 @@ param(
     [string]$RedoSubtitles,
     [switch]$SkipPoster,
     [string]$FetchPoster,
-    [string]$Title
+    [string]$Title,
+    [switch]$ShowToolOutput
 )
 
 . (Join-Path $PSScriptRoot "Config.ps1")
@@ -114,6 +128,88 @@ $TmdbApiKey = $null
 if (Test-Path $TmdbApiKeyFile) { $TmdbApiKey = (Get-Content $TmdbApiKeyFile -Raw).Trim() }
 
 function Get-MarkerPath($file) { "$($file.FullName).converted" }
+
+# HandBrake, seconv and mkvmerge between them print a few hundred lines per
+# file - scan tables, x265 settings, a progress line per percent - which buries
+# the three facts worth seeing. All of it goes to a log beside the raw file
+# instead: "E02.mkv.log", appended to, one block per tool per run. The console
+# gets one line per step, and the tail of the log if something fails.
+# -ShowToolOutput puts the whole lot back on screen as well.
+function Get-LogPath($file) { "$($file.FullName).log" }
+
+function Write-Log($logPath, $text) {
+    if ($logPath) { Add-Content -LiteralPath $logPath -Value $text -Encoding utf8 }
+}
+
+function Write-Step($label, $text) { Write-Host ("   {0,-7} {1}" -f $label, $text) }
+
+# One line, rewritten in place, for a step that takes minutes. Cleared by the
+# Write-Step that reports the result.
+function Write-StepProgress($label, $text) {
+    Write-Host -NoNewline ("`r   {0,-7} {1}" -f $label, $text.PadRight(60))
+}
+function Clear-StepProgress { Write-Host -NoNewline ("`r{0}`r" -f (" " * 72)) }
+
+# Runs a tool with its output going to $logPath, and returns its exit code.
+# With -Progress, HandBrake's "Encoding: task 1 of 1, 42.00 %" lines are kept
+# off the log and shown as a single percentage that updates in place.
+function Invoke-Logged($exe, $toolArgs, $logPath, $label, [switch]$Progress) {
+    Write-Log $logPath ""
+    Write-Log $logPath "=== $label  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Log $logPath ("$exe " + ($toolArgs -join ' '))
+
+    # stderr goes to a file of its own rather than through 2>&1: PowerShell 5.1
+    # wraps a native command's stderr in ErrorRecords, which renders every blank
+    # line as "System.Management.Automation.RemoteException" and sets $? to
+    # false even when the tool exited 0. HandBrake writes everything but the
+    # progress line there, so that detail matters.
+    $errFile = [System.IO.Path]::GetTempFileName()
+    $showed = $false
+    $code = -1
+    # Percent steps, not every line: HandBrake emits a few hundred of them, and
+    # a terminal that doesn't honour the carriage return would scroll all of it.
+    $lastPct = -5
+    try {
+        & $exe @toolArgs 2> $errFile | ForEach-Object {
+            $line = [string]$_
+            if ($Progress -and $line -match 'task \d+ of \d+, ([\d.]+) %') {
+                $pct = [int][double]$Matches[1]
+                if ($pct -ge ($lastPct + 5) -or $pct -eq 100) {
+                    $lastPct = $pct
+                    Write-StepProgress $label ("{0,3} %" -f $pct)
+                    $showed = $true
+                }
+                return
+            }
+            Write-Log $logPath $line
+            if ($ShowToolOutput) { Write-Host "   $line" }
+        }
+        $code = $LASTEXITCODE
+    } finally {
+        if ($showed) { Clear-StepProgress }
+        if (Test-Path $errFile) {
+            Get-Content -LiteralPath $errFile | ForEach-Object {
+                Write-Log $logPath $_
+                if ($ShowToolOutput) { Write-Host "   $_" }
+            }
+            Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Log $logPath "exit $code"
+    return $code
+}
+
+function Show-LogTail($logPath, $count = 15) {
+    if (-not $logPath -or -not (Test-Path $logPath)) { return }
+    Write-Host "   log      $logPath"
+    Get-Content -LiteralPath $logPath -Tail $count | ForEach-Object { Write-Host "   | $_" }
+}
+
+function Format-Duration([timespan]$span) {
+    if ($span.TotalHours -ge 1) { return $span.ToString("h\hmm\m") }
+    if ($span.TotalMinutes -ge 1) { return $span.ToString("m\mss\s") }
+    return $span.ToString("s\s")
+}
 
 # Flat output name for one raw file. A TV season folder (see Get-SeriesInfo in
 # Config.ps1) holding E05.mkv gives "The Crown - S01E05.mkv", and E01-E03.mkv
@@ -153,21 +249,20 @@ function Get-MoviePoster($title, $jpgPath, $searchType = "movie") {
             $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
         }
         if (-not $resp.results -or $resp.results.Count -eq 0) {
-            Write-Host " No TMDb match for '$title'."
+            Write-Step "poster" "no TMDb match for '$title'"
             return $false
         }
 
         $posterPath = $resp.results[0].poster_path
         if (-not $posterPath) {
-            Write-Host " TMDb match for '$title' has no poster image."
+            Write-Step "poster" "TMDb match for '$title' has no poster image"
             return $false
         }
 
         Invoke-WebRequest -Uri "https://image.tmdb.org/t/p/w780$posterPath" -OutFile $jpgPath -ErrorAction Stop
-        Write-Host " Poster saved: $jpgPath"
         return $true
     } catch {
-        Write-Host " Poster fetch failed for '$title': $_"
+        Write-Step "poster" "TMDb fetch failed for '$title': $_"
         return $false
     }
 }
@@ -184,17 +279,27 @@ function Get-ImageMimeType($ext) {
 # Attaches $imagePath into $mkvPath as a "cover.<ext>" attachment, replacing
 # any previous cover (jpg or png) so reruns/format switches don't pile up
 # duplicates.
-function Set-CoverArt($mkvPath, $imagePath) {
-    if (-not (Test-Path $imagePath)) { return }
+function Set-CoverArt($mkvPath, $imagePath, $logPath) {
+    if (-not (Test-Path $imagePath)) { return $false }
     $ext = [System.IO.Path]::GetExtension($imagePath).TrimStart('.').ToLowerInvariant()
     $mimeType = Get-ImageMimeType $ext
     if (-not $mimeType) {
-        Write-Host " Unsupported poster image type '.$ext' - not attaching."
-        return
+        Write-Step "poster" "unsupported image type '.$ext' - not attaching"
+        return $false
     }
-    & $MkvPropEdit_Exe "$mkvPath" --delete-attachment "name:cover.jpg" --delete-attachment "name:cover.png" `
-      --attachment-name "cover.$ext" --attachment-mime-type $mimeType --add-attachment "$imagePath" 2>&1 |
-        ForEach-Object { Write-Host "   $_" }
+    $propArgs = @("$mkvPath", "--delete-attachment", "name:cover.jpg", "--delete-attachment", "name:cover.png",
+                  "--attachment-name", "cover.$ext", "--attachment-mime-type", $mimeType,
+                  "--add-attachment", "$imagePath")
+    # mkvpropedit, like mkvmerge: 0 = ok, 1 = ok with warnings (it warns when
+    # there was no old cover to delete, which is the normal first-time case),
+    # 2 = failure.
+    $code = Invoke-Logged $MkvPropEdit_Exe $propArgs $logPath "mkvpropedit (cover art)"
+    if ($code -gt 1) {
+        Write-Step "poster" "mkvpropedit failed (exit $code) - cover not attached"
+        Show-LogTail $logPath 8
+        return $false
+    }
+    return $true
 }
 
 # A jpg/png already sitting in the raw disc folder (dropped there by hand)
@@ -212,7 +317,6 @@ function Get-LocalPosterImage($rawDirPath) {
 function Get-SeriesPosterImage($show, $rawDirPath) {
     if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
     $posterFile = Join-Path $rawDirPath "poster.jpg"
-    Write-Host " Looking up TV poster for series '$show'..."
     if (-not (Get-MoviePoster $show $posterFile "tv")) {
         # A download that died halfway would otherwise leave a broken poster.jpg
         # behind, and every later episode of the season would reuse it.
@@ -226,7 +330,7 @@ function Get-SeriesPosterImage($show, $rawDirPath) {
 # Uses a jpg/png already in $rawDirPath if there is one; otherwise fetches from
 # TMDb - the tv endpoint for a season folder (see Get-SeriesInfo in Config.ps1),
 # the movie endpoint for anything else. Never blocks the caller on failure.
-function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
+function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath, $logPath) {
     if ($SkipPoster) { return }
 
     $localImage = Get-LocalPosterImage $rawDirPath
@@ -241,8 +345,9 @@ function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
     if ($localImage) {
         $posterPath = [System.IO.Path]::ChangeExtension($targetMkvPath, $localImage.Extension.TrimStart('.'))
         Copy-Item -Path $localImage.FullName -Destination $posterPath -Force
-        Write-Host " Using local poster image: $($localImage.FullName)"
-        Set-CoverArt $targetMkvPath $posterPath
+        if (Set-CoverArt $targetMkvPath $posterPath $logPath) {
+            Write-Step "poster" "$($localImage.Name) attached"
+        }
         return
     }
 
@@ -256,7 +361,9 @@ function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath) {
     $title = Get-MovieTitleGuess $dirName
 
     if (-not (Get-MoviePoster $title $jpgPath)) { return }
-    Set-CoverArt $targetMkvPath $jpgPath
+    if (Set-CoverArt $targetMkvPath $jpgPath $logPath) {
+        Write-Step "poster" "TMDb poster for '$title' attached"
+    }
 }
 
 if ($MarkDone) {
@@ -284,33 +391,67 @@ $DefaultOcrLanguage = $cfg.DefaultOcrLanguage
 # HandBrake output) with mkvmerge. Best-effort: any failure here is logged and
 # swallowed - the H.265 encode itself already succeeded and shouldn't be held
 # hostage by a bad OCR pass.
-function Add-OcrSubtitles($rawPath, $targetMkvPath) {
+function Add-OcrSubtitles($rawPath, $targetMkvPath, $logPath) {
     $json = & $MkvMerge_Exe -J "$rawPath" 2>$null | ConvertFrom-Json
-    $subTracks = $json.tracks | Where-Object { $_.type -eq "subtitles" }
+    $subTracks = @($json.tracks | Where-Object { $_.type -eq "subtitles" })
     if (-not $subTracks) { return }
+
+    # Only the languages HandBrake keeps are worth OCRing: --subtitle-lang-list
+    # drops the rest, so an SRT for them would sit beside no bitmap track. It
+    # also saves the OCR pass on a disc carrying ten languages.
+    $wanted = @($SubtitleLanguages -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    $subTracks = @($subTracks | Where-Object {
+        $l = $_.properties.language
+        if (-not $l -or $l -eq "und") { $l = $DefaultOcrLanguage }
+        $wanted -contains $l.ToLowerInvariant()
+    })
+    if (-not $subTracks) {
+        Write-Step "subs" "no $($wanted -join '/') subtitle track in the raw file - nothing to OCR"
+        return
+    }
 
     $ocrDir = Join-Path $env:TEMP "seconv_$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $ocrDir | Out-Null
 
     try {
+        $failed = 0
+        $n = 0
         foreach ($track in $subTracks) {
-            # seconv's --track-number is 1-based across all tracks (mkvmerge's 0-based id + 1)
+            # seconv's --track-number is the Matroska track number, which is
+            # mkvmerge's 0-based id + 1.
             $trackNumber = $track.id + 1
             $lang = $track.properties.language
             if (-not $lang -or $lang -eq "und") { $lang = $DefaultOcrLanguage }
+            $n++
 
-            Write-Host " Running subtitle OCR on: $rawPath (track #$trackNumber, lang $lang)"
-            & $Seconv_Exe "$rawPath" subrip --track-number:$trackNumber --ocr-engine:tesseract --ocr-language:$lang --output-folder:"$ocrDir" --overwrite 2>&1 |
-                ForEach-Object { Write-Host "   $_" }
+            # seconv can only address a track whose language Tesseract has data
+            # for; without it, it reports "No subtitle tracks matched", which
+            # says nothing about the real problem.
+            $trained = Join-Path $TesseractDir "tessdata\$lang.traineddata"
+            if (-not (Test-Path $trained)) {
+                Write-Step "subs" "no $lang.traineddata in Tesseract - track #$trackNumber ($lang) can't be OCR'd"
+                Write-Log $logPath "skipped track #$trackNumber ($lang): $trained not found"
+                $failed++
+                continue
+            }
 
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host " seconv OCR failed (exit $LASTEXITCODE) on track #$trackNumber - skipping that track."
+            # OCR of a 47 minute track takes minutes, so say which one is running.
+            Write-StepProgress "subs" ("OCR track {0} of {1} ({2})" -f $n, $subTracks.Count, $lang)
+            $seconvArgs = @("$rawPath", "subrip", "--track-number:$trackNumber", "--ocr-engine:tesseract",
+                            "--ocr-language:$lang", "--output-folder:$ocrDir", "--overwrite")
+            $code = Invoke-Logged $Seconv_Exe $seconvArgs $logPath "seconv OCR track #$trackNumber ($lang)"
+            if ($code -ne 0) {
+                Clear-StepProgress
+                Write-Step "subs" "seconv failed (exit $code) on track #$trackNumber ($lang) - that track is skipped"
+                $failed++
             }
         }
+        Clear-StepProgress
 
-        $srtFiles = Get-ChildItem -Path $ocrDir -Filter "*.srt" -File
+        $srtFiles = @(Get-ChildItem -Path $ocrDir -Filter "*.srt" -File)
         if (-not $srtFiles) {
-            Write-Host " seconv produced no SRT files - keeping bitmap subs only."
+            Write-Step "subs" "no SRT came out of seconv - bitmap subs kept as they are"
+            Show-LogTail $logPath 8
             return
         }
 
@@ -326,14 +467,19 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath) {
         }
 
         $tempOut = "$targetMkvPath.withsubs.tmp.mkv"
-        & $MkvMerge_Exe @remuxArgs | ForEach-Object { Write-Host "   $_" }
+        Write-StepProgress "subs" "remuxing $($srtFiles.Count) SRT into the output"
+        $code = Invoke-Logged $MkvMerge_Exe $remuxArgs $logPath "mkvmerge (remux OCR subtitles)"
+        Clear-StepProgress
 
         # mkvmerge exit codes: 0 = ok, 1 = ok with warnings, 2 = failure
-        if ($LASTEXITCODE -le 1 -and (Test-Path $tempOut)) {
+        if ($code -le 1 -and (Test-Path $tempOut)) {
             Move-Item -Path $tempOut -Destination $targetMkvPath -Force
-            Write-Host " OCR subtitles remuxed into: $targetMkvPath"
+            $of = if ($failed) { " ($failed track(s) failed)" } else { "" }
+            $kept = if ($ReplaceBitmapSubs) { "bitmap subs dropped" } else { "bitmap subs kept too" }
+            Write-Step "subs" ("{0} of {1} tracks OCR'd and remuxed, {2}{3}" -f $srtFiles.Count, $subTracks.Count, $kept, $of)
         } else {
-            Write-Host " mkvmerge remux failed (exit $LASTEXITCODE) - keeping bitmap subs only."
+            Write-Step "subs" "mkvmerge remux failed (exit $code) - bitmap subs kept as they are"
+            Show-LogTail $logPath 8
             Remove-Item -Path $tempOut -Force -ErrorAction SilentlyContinue
         }
     } finally {
@@ -375,27 +521,30 @@ if ($RedoSubtitles) {
                 continue
             }
 
-            Write-Host "====================================================="
-            Write-Host " Redoing subtitles: $outPath"
-            Write-Host "====================================================="
+            $logPath = Get-LogPath $raw
+            Write-Host ""
+            Write-Host " redoing subtitles: $(Split-Path $outPath -Leaf)"
+            Write-Log $logPath ("##### ConvertNext -RedoSubtitles $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $outPath")
 
             $stripped = "$outPath.stripped.tmp.mkv"
-            if ($vobsubIds) {
-                & $MkvMerge_Exe -o "$stripped" -s ($vobsubIds -join ",") "$outPath" | Out-Null
+            $stripArgs = if ($vobsubIds) {
+                @("-o", "$stripped", "-s", ($vobsubIds -join ","), "$outPath")
             } else {
-                & $MkvMerge_Exe -o "$stripped" --no-subtitles "$outPath" | Out-Null
+                @("-o", "$stripped", "--no-subtitles", "$outPath")
             }
+            $code = Invoke-Logged $MkvMerge_Exe $stripArgs $logPath "mkvmerge (strip old subtitle tracks)"
 
-            if ($LASTEXITCODE -gt 1 -or -not (Test-Path $stripped)) {
-                Write-Host " Failed to strip old subtitle track (exit $LASTEXITCODE) - skipping."
+            if ($code -gt 1 -or -not (Test-Path $stripped)) {
+                Write-Step "subs" "could not strip the old subtitle track (exit $code) - skipped"
+                Show-LogTail $logPath 8
                 Remove-Item -Path $stripped -Force -ErrorAction SilentlyContinue
                 continue
             }
 
-            Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $stripped
+            Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $stripped -logPath $logPath
 
             Move-Item -Path $stripped -Destination $outPath -Force
-            Write-Host " Done: $outPath"
+            Write-Step "done" $outPath
         }
     }
     exit 0
@@ -426,12 +575,10 @@ if ($FetchPoster) {
                 continue
             }
 
-            Write-Host "====================================================="
-            Write-Host " Fetching poster for: $outPath"
-            Write-Host "====================================================="
-
+            Write-Host ""
+            Write-Host " poster for: $(Split-Path $outPath -Leaf)"
             $posterTitle = if ($Title) { $Title } else { $dir.Name }
-            Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath -rawDirPath $dir.FullName
+            Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath -rawDirPath $dir.FullName -logPath (Get-LogPath $raw)
         }
     }
     exit 0
@@ -467,30 +614,33 @@ function Invoke-ConvertPass {
                 continue
             }
 
-            Write-Host "====================================================="
-            Write-Host " Converting: $($raw.FullName)"
-            Write-Host " Output    : $outPath"
-            Write-Host "====================================================="
+            $logPath = Get-LogPath $raw
+            Write-Host ""
+            Write-Host " $($dir.Name)\$($raw.Name) -> $(Split-Path $outPath -Leaf)"
+            Write-Log $logPath ("##### ConvertNext $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $($raw.FullName) -> $outPath")
 
-            & $HandBrake_Exe -i "$($raw.FullName)" -o "$outPath" `
-              --verbose=0 `
-              -e x265 -q 22 `
-              --audio-lang-list $AudioLanguages --all-audio --aencoder copy `
-              --subtitle-lang-list $SubtitleLanguages --all-subtitles
+            $hbArgs = @("-i", "$($raw.FullName)", "-o", "$outPath",
+                        "--verbose=0", "-e", "x265", "-q", "22",
+                        "--audio-lang-list", $AudioLanguages, "--all-audio", "--aencoder", "copy",
+                        "--subtitle-lang-list", $SubtitleLanguages, "--all-subtitles")
+            $started = Get-Date
+            $code = Invoke-Logged $HandBrake_Exe $hbArgs $logPath "encode" -Progress
 
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $outPath)) {
-                Write-Host " H.265 encode done: $outPath"
+            if ($code -eq 0 -and (Test-Path $outPath)) {
+                Write-Step "encode" ("{0}, {1:N2} GB -> {2:N2} GB" -f `
+                    (Format-Duration ((Get-Date) - $started)), ($raw.Length / 1GB), ((Get-Item $outPath).Length / 1GB))
 
                 if (-not $SkipSubtitles) {
-                    Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $outPath
+                    Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $outPath -logPath $logPath
                 }
 
-                Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath -rawDirPath $dir.FullName
+                Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath -rawDirPath $dir.FullName -logPath $logPath
 
                 New-Item -ItemType File -Path $marker -Force | Out-Null
-                Write-Host " Done: $outPath"
+                Write-Step "done" $outPath
             } else {
-                Write-Host " HandBrake failed (exit $LASTEXITCODE) on $($raw.FullName) - will retry next run."
+                Write-Step "encode" "HandBrake failed (exit $code) - will retry next run"
+                Show-LogTail $logPath 15
                 Remove-Item -Path $outPath -Force -ErrorAction SilentlyContinue
             }
         }
