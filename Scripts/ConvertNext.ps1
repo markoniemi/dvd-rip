@@ -416,6 +416,7 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath, $logPath) {
     try {
         $failed = 0
         $n = 0
+        $ocrResults = @()
         foreach ($track in $subTracks) {
             # seconv's --track-number is the Matroska track number, which is
             # mkvmerge's 0-based id + 1.
@@ -437,18 +438,30 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath, $logPath) {
 
             # OCR of a 47 minute track takes minutes, so say which one is running.
             Write-StepProgress "subs" ("OCR track {0} of {1} ({2})" -f $n, $subTracks.Count, $lang)
+            # Each track gets its own output folder: seconv names its output
+            # "<rawBaseName>.<lang>.srt", so two tracks of the same language
+            # (e.g. full Finnish + a forced/partial Finnish track) would
+            # otherwise overwrite each other and only the last one survives.
+            $trackDir = Join-Path $ocrDir "t$trackNumber"
+            New-Item -ItemType Directory -Path $trackDir -Force | Out-Null
             $seconvArgs = @("$rawPath", "subrip", "--track-number:$trackNumber", "--ocr-engine:tesseract",
-                            "--ocr-language:$lang", "--output-folder:$ocrDir", "--overwrite")
+                            "--ocr-language:$lang", "--output-folder:$trackDir", "--overwrite")
             $code = Invoke-Logged $Seconv_Exe $seconvArgs $logPath "seconv OCR track #$trackNumber ($lang)"
             if ($code -ne 0) {
                 Clear-StepProgress
                 Write-Step "subs" "seconv failed (exit $code) on track #$trackNumber ($lang) - that track is skipped"
                 $failed++
+                continue
+            }
+            $srt = Get-ChildItem -Path $trackDir -Filter "*.srt" -File | Select-Object -First 1
+            if ($srt) {
+                $cues = @(Get-Content -LiteralPath $srt.FullName -Encoding UTF8 | Where-Object { $_ -match '-->' }).Count
+                $ocrResults += [pscustomobject]@{ Path = $srt.FullName; Lang = $lang; TrackNumber = $trackNumber; Cues = $cues }
             }
         }
         Clear-StepProgress
 
-        $srtFiles = @(Get-ChildItem -Path $ocrDir -Filter "*.srt" -File)
+        $srtFiles = @($ocrResults)
         if (-not $srtFiles) {
             Write-Step "subs" "no SRT came out of seconv - bitmap subs kept as they are"
             Show-LogTail $logPath 8
@@ -460,10 +473,25 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath, $logPath) {
         $remuxArgs += "$targetMkvPath"
 
         foreach ($srt in $srtFiles) {
-            # seconv names output "<rawBaseName>.<lang>.srt"
-            $lang = "und"
-            if ($srt.BaseName -match '\.([a-z]{2,3})$') { $lang = $Matches[1] }
-            $remuxArgs += @("--language", "0:$lang", "--track-name", "0:$lang (OCR)", $srt.FullName)
+            $lang = $srt.Lang
+            $name = "$lang (OCR)"
+            $flags = @()
+            # Several tracks in one language: the biggest one is the full
+            # subtitle, a much smaller one is typically forced/partial
+            # (signs, foreign dialogue) - name it so and keep it non-default.
+            $sameLang = @($srtFiles | Where-Object { $_.Lang -eq $lang })
+            if ($sameLang.Count -gt 1) {
+                $primary = $sameLang | Sort-Object -Property Cues -Descending | Select-Object -First 1
+                if ($srt.TrackNumber -eq $primary.TrackNumber) {
+                    # the full track keeps the plain "<lang> (OCR)" name
+                } elseif ($srt.Cues -lt [math]::Max(1, $primary.Cues * 0.2)) {
+                    $name = "$lang (OCR, forced)"
+                    $flags = @("--forced-display-flag", "0:yes", "--default-track-flag", "0:no")
+                } else {
+                    $name = "$lang (OCR, track $($srt.TrackNumber))"
+                }
+            }
+            $remuxArgs += @("--language", "0:$lang", "--track-name", "0:$name") + $flags + @($srt.Path)
         }
 
         $tempOut = "$targetMkvPath.withsubs.tmp.mkv"
