@@ -52,9 +52,14 @@ Priorities: `high` | `medium` | `low`.
 
 ## Backlog
 
-### first frame [planned, medium]
+### first frame [done, medium]
 
 file: [first-frame.md](first-frame.md)
 
 Windows and many applications show videos as icons, and show first frame as icon. Is it possible to set the poster image as first frame or video?
 
+### clean up scripts [draft, low]
+
+- Clean up scripts, make them smaller if possible.
+- Does the help text have to be in script file? What if it was in a separate md file? 
+- Root readme could just contain short instructions 

@@ -1,6 +1,6 @@
 ---
 id: first-frame
-status: planned
+status: done
 priority: medium
 kind: task
 branch: task/first-frame
@@ -107,6 +107,24 @@ own planning pass if the human picks one.
    adds no testable logic. If the route chosen turns out to touch poster
    handling in `ConvertNext.ps1`, it needs tests, and setting one up is
    part of that work.
+
+## Result
+
+Closed without implementing anything. No code was written, no branch was
+made, so there is nothing to merge: this is a decision record.
+
+Route B — prepending poster frames so frame 0 is the cover — was rejected
+as too large for what it buys: every subtitle and chapter timestamp in the
+file would have to shift by the inserted duration, and the frame a
+thumbnail grabber actually picks is undocumented, so the work might not
+even produce the icon it is for. Step 1 (measuring what Explorer does with
+the files on `I:`) was never run.
+
+Routes A (a third-party thumbnail provider reading the cover attachment
+`ConvertNext.ps1` already writes) and C (mp4 `covr` output) are untouched
+rather than ruled out. The findings above stand if the icon ever becomes
+worth another look; the open questions below are what a new task would
+start from.
 
 ## Open questions for the human
 
