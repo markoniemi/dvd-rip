@@ -51,3 +51,10 @@ Priorities: `high` | `medium` | `low`.
 ---
 
 ## Backlog
+
+### first frame [planned, medium]
+
+file: [first-frame.md](first-frame.md)
+
+Windows and many applications show videos as icons, and show first frame as icon. Is it possible to set the poster image as first frame or video?
+
