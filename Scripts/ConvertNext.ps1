@@ -1,84 +1,73 @@
-# ==============================================================================
-# Script: Convert queue (HandBrake + subtitle OCR) - run alongside RipDisc.ps1
-#
-# Scans I:\Video for subfolders (raw rips from MakeMKV). For every *.mkv in
-# those subfolders that hasn't been converted yet:
-#   1. Encodes it to H.265 with HandBrakeCLI, dropped as a flat file directly
-#      in I:\Video (bitmap VobSub subtitles are copied through as-is for now).
-#   2. OCRs each VobSub subtitle track on the RAW file via seconv.exe (Subtitle
-#      Edit's CLI, tesseract engine) to SRT.
-#   3. Remuxes those SRTs into the H.265 output with mkvmerge, alongside the
-#      original bitmap subtitle tracks (nothing is dropped; see
-#      -ReplaceBitmapSubs to change that).
-#
-# Output naming: a raw folder is normally a movie, and the output is named
-# after the folder ("Kiki.mkv", or "Kiki - C1_t01.mkv" when the folder holds
-# several files). A folder named "<Show>_S<season>" is a TV season instead:
-# files in it called E01.mkv, E02.mkv, ... come out as "<Show> - S01E01.mkv",
-# which Plex/Jellyfin parse. A file holding several episodes (a DVD "Play All"
-# title) is named for its range, "E01-E03.mkv" -> "<Show> - S01E01-E03.mkv".
-# RipDisc.ps1 -Title The_Crown_S01 -Index 1 is what produces such a folder;
-# see Get-SeriesInfo in Config.ps1.
-#
-# Raw files are never touched or deleted - clean them up manually once you've
-# checked the output.
-#
-# "Already converted" is tracked with a sidecar marker file next to each raw
-# file: "<file>.mkv.converted". That survives reruns and doesn't care whether
-# a flat output file of a similar name already exists.
-#
-# Requires (one-time setup):
-#   - HandBrakeCLI, MKVToolNix (mkvmerge) - already in use by this pipeline
-#   - Subtitle Edit 5.4+ with seconv.exe (ships as a separate CLI alongside
-#     the GUI install as of v5.4.0-beta5)
-#   - Tesseract OCR on PATH (winget install tesseract-ocr.tesseract) - seconv's
-#     tesseract engine shells out to tesseract.exe
-#
-# Usage:
-#   .\ConvertNext.ps1                      # drain whatever is pending, then exit
-#   .\ConvertNext.ps1 -Watch                # keep polling for new raw folders
-#   .\ConvertNext.ps1 -Only "Kiki"          # restrict this run to one raw subfolder
-#   .\ConvertNext.ps1 -SkipSubtitles        # H.265 encode only, no OCR pass
-#   .\ConvertNext.ps1 -ReplaceBitmapSubs    # drop original bitmap subs, keep only OCR'd SRT
-#   .\ConvertNext.ps1 -MarkDone "Kiki"      # mark all files in that subfolder as
-#                                           # already converted, without encoding
-#                                           # (use for pre-existing raw folders
-#                                           # whose h265 output already exists
-#                                           # under a different name)
-#   .\ConvertNext.ps1 -RedoSubtitles "Kiki" # redo OCR+remux on an already-converted
-#                                           # file (strips the old SRT track, re-OCRs
-#                                           # from the raw source) - no re-encode.
-#                                           # Pass "all" to redo every converted file.
-#   .\ConvertNext.ps1 -SkipPoster           # don't fetch/attach a poster image
-#   .\ConvertNext.ps1 -FetchPoster "Kiki"   # (re)fetch the poster for an already-
-#                                           # converted file without touching video/
-#                                           # subs. Pass "all" to backfill every one.
-#   .\ConvertNext.ps1 -ShowToolOutput       # also put the tools' own output on screen
-#
-# Console output is one line per step - encode, subs, poster, done - with a
-# percentage that rewrites itself in place while HandBrake runs. Everything the
-# tools print goes to a log beside the raw file instead ("E02.mkv.log"), which
-# is appended to, one block per tool per run. When a step fails, the tail of
-# that log is printed with it. -ShowToolOutput streams the lot to the console as
-# well, as earlier versions did.
-#
-# Subtitle OCR covers the languages in SubtitleLanguages, which is also what
-# HandBrake keeps - OCRing a track that won't be in the output is just slow -
-# and each needs its Tesseract data file ("fin.traineddata"), without which
-# seconv can't address the track at all.
-#
-# Poster images: if a .jpg/.jpeg/.png is sitting in the raw disc folder, that
-# wins and gets used as-is (drop one there by hand to fix a bad TMDb guess
-# up front). Otherwise it's fetched from TMDb - the tv endpoint for a season
-# folder, cached as poster.jpg in the raw folder so every episode of that
-# season reuses one lookup, the movie endpoint for anything else. TMDb needs a
-# free API key
-# saved as plain text in tmdb_api_key.txt next to this script
-# (https://www.themoviedb.org/settings/api). Either way, the movie gets a
-# sidecar image next to its mkv AND an embedded cover attachment in the mkv
-# itself (via mkvpropedit) - best-effort, never blocks the rest of the
-# pipeline on failure.
-# ==============================================================================
+<#
+.SYNOPSIS
+    Convert queue: encode pending raw rips to H.265, OCR their subtitles and
+    attach a poster. Run alongside RipDisc.ps1.
+
+.DESCRIPTION
+    Scans VideoRoot for raw rip subfolders and, for every *.mkv in them not
+    yet converted, encodes it with HandBrakeCLI, OCRs each VobSub subtitle
+    track with seconv.exe and remuxes the SRTs in with mkvmerge. Raw files are
+    never touched or deleted.
+
+    See docs/ConvertNext.md for the output naming rules, the .converted
+    marker, the per-file log, the subtitle languages and the poster rules.
+
+.PARAMETER Watch
+    Keep polling for new raw folders instead of exiting when the queue drains.
+
+.PARAMETER PollSeconds
+    How long -Watch waits between looks. Default 60.
+
+.PARAMETER MarkDone
+    Mark every file in that raw subfolder as already converted, without
+    encoding.
+
+.PARAMETER SkipSubtitles
+    H.265 encode only, no OCR pass.
+
+.PARAMETER ReplaceBitmapSubs
+    Drop the original bitmap subtitle tracks, keeping only the OCR'd SRT.
+
+.PARAMETER Only
+    Restrict this run to one raw subfolder, by name.
+
+.PARAMETER RedoSubtitles
+    Redo OCR and remux on an already-converted file, with no re-encode. Pass
+    "all" to redo every converted file.
+
+.PARAMETER SkipPoster
+    Don't fetch or attach a poster image.
+
+.PARAMETER FetchPoster
+    (Re)fetch the poster for an already-converted file, touching neither video
+    nor subtitles. Pass "all" to backfill every one.
+
+.PARAMETER Title
+    The TMDb search term for -FetchPoster, for when the folder name isn't the
+    film's title. It applies to nothing else.
+
+.PARAMETER ShowToolOutput
+    Also put the tools' own output on screen, as well as in the log.
+
+.EXAMPLE
+    .\ConvertNext.ps1
+    Drain whatever is pending, then exit.
+
+.EXAMPLE
+    .\ConvertNext.ps1 -Watch -PollSeconds 300
+    Keep polling for new raw folders, five minutes apart.
+
+.EXAMPLE
+    .\ConvertNext.ps1 -Only "Kiki" -ReplaceBitmapSubs
+    One raw subfolder, keeping only the OCR'd SRT tracks.
+
+.EXAMPLE
+    .\ConvertNext.ps1 -FetchPoster "Kiki" -Title "Kiki's Delivery Service"
+    Re-fetch just the poster, searching TMDb for that title.
+
+.LINK
+    docs/ConvertNext.md
+#>
 
 param(
     [switch]$Watch,

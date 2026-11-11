@@ -1,78 +1,65 @@
-# ==============================================================================
-# Script: Name the raw titles in a TV season folder E01.mkv, E02.mkv, ...
-#
-# MakeMKV names its output by title index ("C1_t00.mkv"), and a DVD usually
-# carries more titles than episodes: a "Play All" title holding several
-# episodes back to back, and sometimes the same episode twice. Numbering files
-# blindly in title order therefore shifts every episode after the first extra
-# title, which is why RipDisc.ps1 -Index can't be trusted on its own.
-#
-# This script classifies the titles by arithmetic instead of by position, from
-# durations and chapter boundaries read out of the files themselves:
-#
-#   Duplicate - same duration (within tolerance) and chapter count as a title
-#               already accounted for.
-#   Play All  - it holds a run of the other titles end to end, every chapter
-#               mark of each lining up inside it; OR its duration equals the
-#               sum of a run of them and their chapter counts add up; OR one of
-#               its chapters starts exactly where another title ends, meaning it
-#               begins with that whole title and continues past it.
-#   Episode   - whatever is left, numbered in title order, unless it is one
-#               block of a Play All (then it takes that block's number), far
-#               longer than the episodes around it (then it's left alone: a
-#               Christmas special is not simply the next episode), or far
-#               shorter (a bonus feature that got past --minlength).
-#
-# Nothing is guessed silently: every verdict is printed with the arithmetic
-# behind it, and a title the rules can't explain is reported as Unknown and
-# left alone. Dry run by default - add -Execute to apply.
-#
-# "Far longer" and "far shorter" are measured against the median of the episodes
-# already pinned down (MultiEpisodeRatio, 1.8x either way). That yardstick is
-# only as good as what the folder holds: name the earlier discs of a season
-# first and it is solid, but in a folder of three titles and nothing named yet
-# it can be skewed by a long one. The duration of every title is printed, so it
-# can be checked by eye.
-#
-# A name is not proof either. A file called E04.mkv is believed until the
-# arithmetic says otherwise - and a Play All numbered as an episode by
-# RipDisc.ps1 -Index is exactly what it catches: Downton Abbey season 5 arrived
-# with three of them sitting among the episodes, as E04, E08 and E12. A single
-# E## name is dropped when the file turns out to hold a run of the other titles
-# mark for mark, which frees that number again. Whatever can be doubted but not
-# disproved - a named episode much shorter than the rest, two numbers on one
-# title, a number with no file behind it - is printed under "--- check ---" and
-# left for the human.
-#
-# Usage:
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01                   # dry run
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute          # apply
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5          # first episode is 5
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute   # cut Play Alls into episodes
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work     # look under I:\Work, not VideoRoot
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -SplitAt 9,15     # cut there, don't work it out
-#   .\NameEpisodes.ps1 -DirName The_Crown_S01 -SplitAt "E01-E03=9,15","E07-E08=7"
-#
-# -SplitAt is the last word on where a range-named file is cut, for the discs
-# whose chapters the arithmetic can't settle: Downton Abbey season 4 disc 1 is
-# 20 chapters holding three episodes, which no even division fits and no other
-# title on the disc anchors. Give the chapter numbers to cut BEFORE. Without a
-# file name it applies to the one range-named file that needs it, and says so
-# rather than guessing when several could.
-#
-# Without -Index the first episode number continues from the highest E## file
-# already in the folder, so the next disc of a season needs no argument.
-#
-# Play All titles: by default they are kept whole. One holding episodes nobody
-# else covers is named for its range ("E01-E03.mkv", which ConvertNext.ps1
-# turns into "<Show> - S01E01-E03.mkv"); one whose episodes all exist on their
-# own is redundant and moves to _extra\ (ConvertNext.ps1 scans only the top
-# level of a raw folder, so _extra\ is ignored). With -Split it is cut into
-# single episodes at its chapter boundaries with mkvmerge - lossless, no
-# re-encode - and the original then moves to _extra\.
-#
-# Duplicates always move to _extra\. Nothing is ever deleted.
-# ==============================================================================
+<#
+.SYNOPSIS
+    Name the raw titles in a TV season folder E01.mkv, E02.mkv, ... by
+    arithmetic rather than by title order.
+
+.DESCRIPTION
+    Classifies the titles in a season folder as Duplicate, Play All or Episode
+    from durations and chapter boundaries read out of the files themselves,
+    because MakeMKV's title order is not episode order. Dry run by default;
+    nothing is ever deleted.
+
+    See docs/NameEpisodes.md for how each verdict is reached, what the
+    "--- check ---" list means, and how Play All titles are handled.
+
+.PARAMETER DirName
+    The season folder to work on, by name. Required.
+
+.PARAMETER Index
+    The first episode number in this folder. Without it, numbering continues
+    from the highest E## file already there.
+
+.PARAMETER Split
+    Cut Play All titles into single episodes at their chapter boundaries with
+    mkvmerge - lossless, no re-encode.
+
+.PARAMETER Execute
+    Apply the plan. Without it the script only prints what it would do.
+
+.PARAMETER SplitAt
+    The chapters to cut a range-named file BEFORE, overriding whatever the
+    script worked out: "9,15", or "E01-E03=9,15" to name the file.
+
+.PARAMETER Root
+    Look under this folder instead of VideoRoot (a staging folder).
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName The_Crown_S01
+    Dry run.
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute
+    Apply it.
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5
+    The first episode in the folder is 5.
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute
+    Cut the Play All titles into episodes.
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work
+    Look under I:\Work, not VideoRoot.
+
+.EXAMPLE
+    .\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt "E01-E03=9,15","E07-E08=7"
+    Cut there, rather than working it out.
+
+.LINK
+    docs/NameEpisodes.md
+#>
 
 param(
     [Parameter(Mandatory = $true)][string]$DirName,
