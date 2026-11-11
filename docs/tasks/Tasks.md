@@ -58,7 +58,7 @@ file: [first-frame.md](first-frame.md)
 
 Windows and many applications show videos as icons, and show first frame as icon. Is it possible to set the poster image as first frame or video?
 
-### documentation [in_review, low]
+### documentation [done, low]
 
 file: [documentation.md](documentation.md)
 
@@ -66,7 +66,8 @@ file: [documentation.md](documentation.md)
 - Root readme could just contain short instructions and reference other md files.
 - would it make sense to have md named like the script?
 
-### simplify scripts [draft, low]
+### simplify scripts [planning, low]
 - suggest how to simplify scripts
 - what features can be dropped?
-- is there an optional feature that would remove much code from scripts? 
+- is there an optional feature that would remove much code from scripts?
+- poster image feature can be dropped.

@@ -1,6 +1,6 @@
 ---
 id: documentation
-status: in_review
+status: done
 priority: low
 kind: task
 branch: task/documentation
