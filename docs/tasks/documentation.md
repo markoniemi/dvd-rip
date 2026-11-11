@@ -1,6 +1,6 @@
 ---
 id: documentation
-status: in_progress
+status: in_review
 priority: low
 kind: task
 branch: task/documentation
@@ -97,6 +97,35 @@ Recommendation: **C**.
 
 Done one script per commit, so a bad house style is caught on the first
 one and not on the seventh.
+
+## How to review
+
+Commits are one step each, in order, so reading them in sequence is the
+cheapest route: two poster scripts, RipDisc + InstallTools, the two big
+scripts, then the README/config/test commit.
+
+1. `.\Scripts\Test-Docs.ps1` — prints
+   `checked 6 script(s) with parameters, 12 markdown file(s), 25 relative
+   link(s)` then `all good`, exit 0. Run.
+2. That the check can fail was proved by breaking things on purpose: an
+   undocumented parameter, a script with no `.SYNOPSIS` and no markdown
+   file, and a dead link each produced a `FAIL` line and exit 1. Those
+   probes were reverted (`git status` is clean of them). Run.
+3. `Get-Help .\Scripts\ConvertNext.ps1 -Full` — all 11 parameters, four
+   examples. `Get-Help .\Scripts\NameEpisodes.ps1 -Full` — six and six. Run
+   for all six scripts that take parameters.
+4. That no behaviour changed: every script's text from its `param(` block
+   onward is byte-identical to `main`, checked script by script. Only the
+   header comments differ. Run.
+5. Read `README.md` top to bottom — it should now be an index you can
+   finish, with the per-flag prose gone.
+6. `docs/NameEpisodes.md` and `docs/ConvertNext.md` hold the moved prose.
+   Worth a read against `git show main:Scripts/NameEpisodes.ps1` to confirm
+   the wording is the old wording.
+
+Not run: no script was executed against the disc or the library, so
+ripping, converting and poster fetching are unproven by this task — the
+argument for that being safe is point 4, not a test.
 
 ## Answers
 
