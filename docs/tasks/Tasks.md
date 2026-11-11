@@ -58,7 +58,7 @@ file: [first-frame.md](first-frame.md)
 
 Windows and many applications show videos as icons, and show first frame as icon. Is it possible to set the poster image as first frame or video?
 
-### documentation [planned, low]
+### documentation [in_progress, low]
 
 file: [documentation.md](documentation.md)
 

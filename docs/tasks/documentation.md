@@ -1,6 +1,6 @@
 ---
 id: documentation
-status: planned
+status: in_progress
 priority: low
 kind: task
 branch: task/documentation
@@ -98,16 +98,14 @@ Recommendation: **C**.
 Done one script per commit, so a bad house style is caught on the first
 one and not on the seventh.
 
-## Open questions for the human
+## Answers
 
-1. **Route A, B, C or D?** C is the recommendation; B alone leaves `-?`
-   empty, which is the part that is broken today.
-2. **Where do the config keys live?** One home only: the README table, or
-   a `docs/Configuration.md` that README links to. The other two copies
-   become pointers either way.
-3. **Do you want `Scripts/Test-Docs.ps1`**, and does it count as this
-   task's tests? Without it the task ships no executable change at all.
-4. **Move the prose verbatim, or compress it?** `NameEpisodes.ps1`'s
-   header is 75 lines of genuinely useful reasoning. Moving it as-is is
-   safe and reviewable; trimming it is a second judgement call and makes
-   the diff much harder to read.
+1. **Route C**, decided by the human.
+2. **Move the prose verbatim**, decided by the human.
+3. Config keys: not answered, so taken as **`docs/Configuration.md`** —
+   under route C the README is an index, and a 26-row table is not an
+   index. README and `config.example.json` point at it.
+4. `Scripts/Test-Docs.ps1`: not answered, so **written**. It is the only
+   executable thing this task produces and it is what proves the
+   `.PARAMETER` coverage, so the alternative is a task with nothing to
+   run.
