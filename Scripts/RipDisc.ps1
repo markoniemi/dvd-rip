@@ -1,28 +1,42 @@
-# ==============================================================================
-# Script 1: Rip Disc (MakeMKV with Title Detection)
-#
-# Usage:
-#   .\RipDisc.ps1                                  # folder named after the disc label
-#   .\RipDisc.ps1 -Title Kikis_Delivery_Service    # folder named explicitly
-#   .\RipDisc.ps1 -Title The_Crown_S01 -Index 1    # TV season, disc 1 -> E01.mkv, E02.mkv, ...
-#   .\RipDisc.ps1 -Title The_Crown_S01 -Index 5    # next disc of it, continues at E05.mkv
-#
-# Disc labels are often useless ("G7_67158D1"), so -Title overrides them. With
-# -Title an existing folder is REUSED, so every disc of a season lands in one
-# folder; without it, a timestamp suffix keeps earlier rips intact.
-#
-# -Index <n> renames the ripped files to E<nn>.mkv starting at n, in MakeMKV
-# title order. ConvertNext.ps1 turns "The_Crown_S01\E05.mkv" into
-# "The Crown - S01E05.mkv" (see Get-SeriesInfo in Config.ps1).
-#
-# Title order is USUALLY episode order, but a "Play All" title or a bonus
-# feature longer than MinLengthSeconds shifts everything by one. Every rip
-# appends the disc's title table (duration, chapter count, source VOB) to
-# titles.txt in the output folder - check it against the renames this script
-# prints before converting. A "Play All" title that holds several episodes can
-# be renamed for its range by hand, "E01-E03.mkv", and ConvertNext.ps1 turns
-# that into "The Crown - S01E01-E03.mkv".
-# ==============================================================================
+<#
+.SYNOPSIS
+    Rip the main feature(s) off a disc with MakeMKV into a folder under
+    VideoRoot.
+
+.DESCRIPTION
+    Step 1 of the pipeline: disc -> raw mkv, with title detection. Every rip
+    also appends the disc's title table to titles.txt in the output folder.
+
+    See docs/RipDisc.md for why title order is not episode order, and what the
+    _rip subfolder is for.
+
+.PARAMETER Title
+    Names the output folder instead of the disc label. An existing folder is
+    reused, so every disc of a season lands in one folder.
+
+.PARAMETER Index
+    The first episode number on the disc in the drive. Renames the ripped
+    files to E<nn>.mkv starting at n, in MakeMKV title order.
+
+.EXAMPLE
+    .\RipDisc.ps1
+    Folder named after the disc label.
+
+.EXAMPLE
+    .\RipDisc.ps1 -Title Kikis_Delivery_Service
+    Folder named explicitly.
+
+.EXAMPLE
+    .\RipDisc.ps1 -Title The_Crown_S01 -Index 1
+    TV season, disc 1 -> E01.mkv, E02.mkv, ...
+
+.EXAMPLE
+    .\RipDisc.ps1 -Title The_Crown_S01 -Index 5
+    The next disc of it, continuing at E05.mkv.
+
+.LINK
+    docs/RipDisc.md
+#>
 
 param(
     [string]$Title,

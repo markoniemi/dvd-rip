@@ -1,26 +1,41 @@
-# ==============================================================================
-# Script: Install all tools this pipeline needs, via winget.
-#
-# Installs (skips any that's already present at its expected path):
-#   - MakeMKV           (RipDisc.ps1)
-#   - HandBrakeCLI       (ConvertNext.ps1 - encode)
-#   - MKVToolNix         (ConvertNext.ps1/FixPosters.ps1 - mkvmerge/mkvpropedit)
-#   - Subtitle Edit      (ConvertNext.ps1 - seconv.exe OCR CLI)
-#   - Tesseract OCR      (ConvertNext.ps1 - OCR engine seconv shells out to)
-#
-# Winget's Subtitle Edit package can lag behind the 5.4.0-beta5+ needed for
-# seconv.exe to exist. This script checks for seconv.exe afterwards and
-# tells you to grab a newer installer manually from nikse.dk if it's missing.
-#
-# Usage:
-#   .\InstallTools.ps1                     # install everything that's missing
-#   .\InstallTools.ps1 -SkipMakeMKV         # (also: -SkipHandBrake, -SkipMkvToolNix,
-#                                           #  -SkipSubtitleEdit, -SkipTesseract)
-#
-# Expected install paths come from the same config as the other scripts
-# (see Config.ps1 / config.example.json) - override there if you install
-# somewhere non-default.
-# ==============================================================================
+<#
+.SYNOPSIS
+    Install all tools this pipeline needs, via winget.
+
+.DESCRIPTION
+    Skips anything already present at its expected path. Those paths come from
+    the same config as the other scripts, so override them there if you
+    install somewhere non-default (see docs/Configuration.md).
+
+    See docs/InstallTools.md for the tool list and the Subtitle Edit version
+    trap.
+
+.PARAMETER SkipMakeMKV
+    Don't install MakeMKV (the ripper).
+
+.PARAMETER SkipHandBrake
+    Don't install HandBrakeCLI (the H.265 encoder).
+
+.PARAMETER SkipMkvToolNix
+    Don't install MKVToolNix (mkvmerge/mkvpropedit/mkvextract).
+
+.PARAMETER SkipSubtitleEdit
+    Don't install Subtitle Edit (seconv.exe, the subtitle OCR CLI).
+
+.PARAMETER SkipTesseract
+    Don't install Tesseract OCR (the engine seconv shells out to).
+
+.EXAMPLE
+    .\InstallTools.ps1
+    Install everything that's missing.
+
+.EXAMPLE
+    .\InstallTools.ps1 -SkipMakeMKV
+    Install the rest, leaving MakeMKV alone.
+
+.LINK
+    docs/InstallTools.md
+#>
 
 param(
     [switch]$SkipMakeMKV,
