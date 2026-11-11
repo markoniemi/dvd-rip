@@ -1,28 +1,38 @@
-# ==============================================================================
-# Script: Fetch a candidate TMDb poster into each raw disc folder that
-# doesn't already have one, for review before it gets baked into the mkv.
-#
-# ConvertNext.ps1 uses a jpg/png already sitting in the raw disc folder as
-# the poster instead of asking TMDb (see its header comment). This script is
-# how you get a candidate image into those folders so you can look at it -
-# and swap it for a different file, or delete it - before running
-# ConvertNext.ps1.
-#
-# Scans every raw folder under VideoRoot and skips any that already has a
-# jpg/jpeg/png in it (whether from a previous run of this script or dropped
-# in by hand) - it never overwrites an existing candidate.
-#
-# Usage:
-#   .\FetchPosterPreview.ps1                                    # all raw folders missing a poster
-#   .\FetchPosterPreview.ps1 -DirName "Kiki"                    # just that one folder
-#   .\FetchPosterPreview.ps1 -DirName "Kiki" -Title "Kiki's Delivery Service"
-#
-# A "<Show>_S<season>" folder (see Get-SeriesInfo in Config.ps1) is searched on
-# TMDb's tv endpoint under the show name - one poster.jpg for the whole season,
-# which every episode of it then reuses.
-#
-# Requires the same tmdb_api_key.txt next to this script as the other scripts.
-# ==============================================================================
+<#
+.SYNOPSIS
+    Fetch a candidate TMDb poster into each raw disc folder that doesn't
+    already have one, for review before it gets baked into the mkv.
+
+.DESCRIPTION
+    Scans every raw folder under VideoRoot and never overwrites a folder that
+    already holds a jpg/jpeg/png. Needs the same tmdb_api_key.txt next to this
+    script as the other scripts.
+
+    See docs/FetchPosterPreview.md for how this fits ConvertNext.ps1 and how a
+    season folder is searched.
+
+.PARAMETER DirName
+    One raw disc folder under VideoRoot, by name. Omit it and every raw folder
+    missing a poster is fetched.
+
+.PARAMETER Title
+    The TMDb search term, for when the folder name is not the film's title.
+
+.EXAMPLE
+    .\FetchPosterPreview.ps1
+    All raw folders missing a poster.
+
+.EXAMPLE
+    .\FetchPosterPreview.ps1 -DirName "Kiki"
+    Just that one folder.
+
+.EXAMPLE
+    .\FetchPosterPreview.ps1 -DirName "Kiki" -Title "Kiki's Delivery Service"
+    Search TMDb for the real title rather than the folder name.
+
+.LINK
+    docs/FetchPosterPreview.md
+#>
 
 param(
     [string]$DirName,

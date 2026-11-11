@@ -1,27 +1,30 @@
-# ==============================================================================
-# Script: Re-apply poster images from raw disc folders onto already-converted
-# mkv files.
-#
-# ConvertNext.ps1 bakes the poster in at conversion time. This script redoes
-# that step on demand, from whatever image is sitting in the raw disc folder
-# right now - so to fix a wrong cover you drop a better jpg/png into the raw
-# folder (replacing the old one) and rerun this.
-#
-# For every raw *.mkv that is marked converted ("<file>.mkv.converted") and
-# whose converted output exists, it:
-#   1. copies the raw folder's jpg/jpeg/png next to the converted mkv, named
-#      after it ("<mkv basename>.<ext>"),
-#   2. re-attaches it as the mkv's "cover.<ext>" attachment, replacing any
-#      previous cover.
-#
-# Raw folders with no image, raw files not yet converted, and raw files whose
-# converted output is missing are skipped - nothing is fetched from TMDb here
-# (use FetchPosterPreview.ps1 for that).
-#
-# Usage:
-#   .\FixPosters.ps1                  # every converted file that has a poster in its raw folder
-#   .\FixPosters.ps1 -DirName "Kiki"  # just that one raw folder
-# ==============================================================================
+<#
+.SYNOPSIS
+    Re-apply poster images from raw disc folders onto already-converted mkv
+    files.
+
+.DESCRIPTION
+    ConvertNext.ps1 bakes the poster in at conversion time; this redoes that
+    step on demand from whatever image is sitting in the raw disc folder right
+    now. Nothing is fetched from TMDb here.
+
+    See docs/FixPosters.md for what is skipped and why.
+
+.PARAMETER DirName
+    One raw disc folder under VideoRoot to fix, by name. Omit it and every
+    converted file with a poster in its raw folder is done.
+
+.EXAMPLE
+    .\FixPosters.ps1
+    Every converted file that has a poster in its raw folder.
+
+.EXAMPLE
+    .\FixPosters.ps1 -DirName "Kiki"
+    Just that one raw folder.
+
+.LINK
+    docs/FixPosters.md
+#>
 
 param(
     [string]$DirName
