@@ -7,287 +7,59 @@ Pipeline: `RipDisc.ps1` (disc → raw mkv) → `ConvertNext.ps1` (raw mkv →
 H.265 + OCR'd subs + poster). `FixPosters.ps1` re-applies posters to
 already-converted files afterwards.
 
-## 1. Install required tools
+## Setting up
 
-Run this to install everything via winget in one go:
+1. **Install the tools** — `.\Scripts\InstallTools.ps1` does the lot via
+   winget. See [docs/InstallTools.md](docs/InstallTools.md) for the tool
+   list, the manual installs, and the Subtitle Edit version trap.
+2. **Get a TMDb API key** and save it in `Scripts/tmdb_api_key.txt` — see
+   [docs/Configuration.md](docs/Configuration.md). Posters are best-effort:
+   without the key everything else still runs.
+3. **Configure, optionally** — copy `Scripts\config.example.json` to
+   `Scripts\config.json` and change only what you need. Every key is in
+   [docs/Configuration.md](docs/Configuration.md).
 
-```bash
-.\Scripts\InstallTools.ps1
-```
+## The scripts
 
-Skips anything already installed. Flags to skip individual tools:
-`-SkipMakeMKV`, `-SkipHandBrake`, `-SkipMkvToolNix`, `-SkipSubtitleEdit`,
-`-SkipTesseract`. It warns if Subtitle Edit's winget build is older than
-5.4.0-beta5 (needed for `seconv.exe`) — if so, grab a newer installer
-manually from [nikse.dk](https://www.nikse.dk/subtitleedit).
+Every script documents its own flags. `Get-Help .\Scripts\<name>.ps1 -Full`
+is the reference; the markdown beside it is the why.
 
-Or install manually:
-
-| Tool | Used for | Install |
+| Script | What it does | Notes |
 |---|---|---|
-| [MakeMKV](https://www.makemkv.com/) | Ripping the disc | Download installer from makemkv.com |
-| [HandBrakeCLI](https://handbrake.fr/downloads2.php) | H.265 encode | `winget install HandBrake.HandBrake.CLI` |
-| [MKVToolNix](https://mkvtoolnix.download/) | `mkvmerge`/`mkvpropedit` (remux subs, attach poster) | `winget install MoritzBunkus.MKVToolNix` |
-| [Subtitle Edit](https://www.nikse.dk/subtitleedit) 5.4+ | `seconv.exe` CLI, OCRs bitmap (VobSub) subtitles | Download installer from nikse.dk (ships `seconv.exe` alongside the GUI from v5.4.0-beta5 on) |
-| [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | OCR engine `seconv` shells out to | `winget install tesseract-ocr.tesseract` |
+| [`RipDisc.ps1`](docs/RipDisc.md) | Disc → raw mkv, with MakeMKV | Title order is not episode order |
+| [`NameEpisodes.ps1`](docs/NameEpisodes.md) | Names a season's titles `E01.mkv`… by arithmetic | Dry run by default |
+| [`ConvertNext.ps1`](docs/ConvertNext.md) | Raw mkv → H.265, OCR'd subs, poster | The main workhorse |
+| [`FetchPosterPreview.ps1`](docs/FetchPosterPreview.md) | Pulls a candidate poster into each raw folder | Check it before converting |
+| [`FixPosters.ps1`](docs/FixPosters.md) | Re-applies posters to converted files | Never fetches from TMDb |
+| [`InstallTools.ps1`](docs/InstallTools.md) | Installs the five tools via winget | Skips what's there |
+| `Config.ps1` | Shared config loader, dot-sourced | [docs/Configuration.md](docs/Configuration.md) |
+| `Test-Docs.ps1` | Checks this documentation holds together | Run it after editing docs |
 
-After installing, confirm the exe paths match what's in
-[`Scripts/config.example.json`](Scripts/config.example.json) — if any tool
-installed somewhere else, override it in your own `config.json` (see
-step 3).
+## A typical session
 
-## 2. Get a TMDb API key
+Rip a film, then convert it:
 
-1. Create a free account at [themoviedb.org](https://www.themoviedb.org/).
-2. Go to **Settings → API** ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)) and request a free API key (choose "Developer" use).
-3. Save the key as plain text in `Scripts/tmdb_api_key.txt` (just the key, nothing else). This file is gitignored — never commit it.
-
-Posters are best-effort: if the key is missing, `ConvertNext.ps1` still
-runs, it just skips the poster step.
-
-## 3. Configure (optional)
-
-Defaults live in each script and point at the usual install paths and
-`I:\Video`. To override anything (drive letter, tool paths, video folder,
-etc.) without editing the scripts:
-
-```bash
-Copy-Item Scripts\config.example.json Scripts\config.json
-```
-
-Edit `Scripts\config.json` and change only the keys you need — anything
-you leave out keeps its script default. `config.json` is gitignored (it's
-machine-specific), so this never gets committed. Every key, and the script
-default it replaces:
-
-| Key | Default | What it does |
-|---|---|---|
-| `VideoRoot` | `I:\Video` | Raw rips land in a subfolder here; converted files are written flat in it |
-| `DriveLetter` | `J:` | The disc drive `RipDisc.ps1` reads |
-| `MinLengthSeconds` | `3600` | MakeMKV `--minlength`. Drop to ~`1200` for TV, or 47-minute episodes are skipped |
-| `MakeMKV_Exe` | `…\MakeMKV\makemkvcon64.exe` | Ripper |
-| `HandBrake_Exe` | `…\HandBrake\HandBrakeCLI.exe` | H.265 encoder |
-| `Seconv_Exe` | `…\Subtitle Edit\seconv.exe` | Subtitle OCR CLI |
-| `MkvMerge_Exe` | `…\MKVToolNix\mkvmerge.exe` | Remux, and the chapter split in `NameEpisodes.ps1` |
-| `MkvExtract_Exe` | `…\MKVToolNix\mkvextract.exe` | Reads chapter marks for `NameEpisodes.ps1` |
-| `MkvPropEdit_Exe` | `…\MKVToolNix\mkvpropedit.exe` | Attaches the poster |
-| `TesseractDir` | `…\Tesseract-OCR` | Added to `PATH` so `seconv` can shell out to it |
-| `TmdbApiKeyFile` | `Scripts\tmdb_api_key.txt` | Where the TMDb key is read from (absolute path if you move it) |
-| `StableSeconds` | `30` | Ignore files written more recently than this — a rip still running |
-| `DefaultOcrLanguage` | `fin` | OCR language for a subtitle track tagged `und` or nothing |
-| `AudioLanguages` | `fin,eng,jpn` | HandBrake `--audio-lang-list` |
-| `SubtitleLanguages` | `fin,eng` | HandBrake `--subtitle-lang-list` |
-| `MinEpisodeSeconds` | `900` | `NameEpisodes.ps1`: shorter than this is not an episode |
-| `MaxEpisodeSeconds` | `6000` | `NameEpisodes.ps1`: longer than this is a Play All, not an episode |
-| `MultiEpisodeRatio` | `1.8` | `NameEpisodes.ps1`: this many times the folder's median episode (or that fraction of it) is reported rather than numbered |
-| `DurationToleranceSeconds` | `3` | `NameEpisodes.ps1`: how far two durations may differ and still count as equal |
-
-`config.example.json` carries all of these except `TmdbApiKeyFile` (add that
-one only if you keep the key somewhere else, as an absolute path), and has
-`MinLengthSeconds` already lowered to `3000`. Keys a script doesn't know are
-ignored, so one `config.json` serves the whole pipeline.
-
-## 4. Running the scripts
-
-**Rip a disc** — put the disc in the drive, then:
-
-```bash
-.\Scripts\RipDisc.ps1
-```
-
-Rips the main feature(s) with MakeMKV into a new subfolder under
-`I:\Video`, named after the disc label.
-
-Disc labels are often useless (`G7_67158D1`), so name the folder yourself:
-
-```bash
+```powershell
 .\Scripts\RipDisc.ps1 -Title Kikis_Delivery_Service
-```
-
-**TV series** — a folder named `<Show>_S<season>` holds a whole season, and
-`-Index` is the first episode number on the disc in the drive:
-
-```bash
-.\Scripts\RipDisc.ps1 -Title The_Crown_S01 -Index 1   # disc 1 -> E01.mkv, E02.mkv
-.\Scripts\RipDisc.ps1 -Title The_Crown_S01 -Index 3   # disc 2 -> E03.mkv, E04.mkv
-```
-
-With `-Title` an existing folder is reused, so every disc of the season
-lands in one folder; without it, a timestamp suffix keeps earlier rips
-intact. `ConvertNext.ps1` turns `The_Crown_S01\E05.mkv` into
-`The Crown - S01E05.mkv`, which Plex/Jellyfin parse.
-
-MakeMKV names its files after the disc volume label (`C1_t00.mkv`), and
-discs of one season often carry the *same* label, so disc 2 would
-otherwise write over disc 1. Each rip therefore lands in a `_rip`
-subfolder first and is moved up afterwards (a rename, not a copy); a name
-already taken gets a disc counter, `C1_d2_t00.mkv`. Nothing is
-overwritten, and only this disc's files are renamed by `-Index`, so
-unrenamed titles from an earlier disc are left where they are. Both
-`_rip` and the counter are invisible to the rest of the pipeline.
-
-`-Index` numbers the files in MakeMKV title order, which is *usually*
-episode order — a "Play All" title or a bonus feature longer than
-`MinLengthSeconds` shifts everything by one. Every rip appends the disc's
-title table (duration, chapter count, source VOB, and whether
-`--minlength` keeps it) to `titles.txt` in the output folder; check it
-against the renames the script prints before converting. If `-Index` was
-wrong, rename the files by hand — the episode number lives in the raw
-file name, so `ConvertNext.ps1` picks up the correction. A "Play All"
-title that holds several episodes can be kept whole and named for its
-range instead: `E01-E03.mkv`.
-
-Note that `MinLengthSeconds` (3000 in `config.example.json`, 3600 by
-default) drops TV episodes — a 47-minute episode is only 2820 s. Lower it
-in `config.json` to about `1200` before ripping a series, and check
-`titles.txt` to see what that lets through.
-
-**Name a season's titles by arithmetic** — rather than trusting title
-order, `NameEpisodes.ps1` reads durations and chapter marks out of the
-files and works out what each one is:
-
-```bash
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01                  # dry run
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute         # apply
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute  # cut Play Alls up
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5         # first episode is 5
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work    # look here, not in VideoRoot
-```
-
-Where a range-named file's chapters settle nothing — Downton Abbey season
-4 disc 1 is 20 chapters holding three episodes, which no even division
-fits and no other title on the disc anchors — give the cut points
-yourself, as the chapters to cut *before*:
-
-```bash
-.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt 9,15
-.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt "E01-E03=9,15","E07-E08=7"
-```
-
-`-SplitAt` overrides whatever the script worked out. Without a file name
-it applies to the one range-named file that needs it, and says which files
-it could have meant rather than picking. The chapter numbers are taken as
-given — only impossible ones are refused — so the plan is worth reading
-before adding `-Execute`.
-
-It numbers what's left over, continuing from the highest `E##` already in
-the folder, and sets aside what isn't an episode: a title ripped twice, a
-Play All whose episodes all exist on their own, a standalone episode that a
-Play All also holds (that file keeps the number, the Play All's copy of it
-goes to `_extra\`). Episode numbers are only assigned where the arithmetic
-is decisive. A file far longer than the episodes around it — a Christmas
-special, or two episodes no rule could separate — is reported and left
-alone rather than numbered. Rename it `E09.mkv` or `E07-E08.mkv` by hand
-and the next run takes that as given. Nothing is ever deleted, every move
-goes to `rename-log.txt`, and dry run is the default.
-
-A name already on a file is believed, but checked. `-Index` numbers a disc's
-Play All title along with the episodes, so `E04.mkv` can turn out to be the
-whole first half of the disc — Downton Abbey season 5 arrived with three of
-those among its episodes. A single `E##` name is dropped when the file is
-shown to hold a run of the other titles mark for mark, and that number goes
-back to being free. What can be doubted but not disproved is printed under
-`--- check ---` and left alone: an episode much shorter than the rest (a
-bonus feature that got past `MinLengthSeconds`), two numbers on one title,
-or a number with no file behind it. A gap is worth reading rather than
-closing blindly — it also appears when the missing episode is simply on a
-disc you haven't ripped yet.
-
-Run it per disc rather than once at the end of a season: title order is
-only meaningful within one disc.
-
-**Convert pending rips** — encodes any raw rip not yet converted, OCRs its
-subtitles, and attaches a TMDb poster:
-
-```bash
 .\Scripts\ConvertNext.ps1
 ```
 
-Output is named after the raw folder (`Kiki.mkv`, or `Kiki - C1_t01.mkv`
-when the folder holds several files). A `<Show>_S<season>` folder is
-treated as a TV season instead: `E01.mkv` in it comes out as
-`<Show> - S01E01.mkv`. A file holding several episodes — a DVD "Play All"
-title — is named for its range, `E01-E03.mkv` →
-`<Show> - S01E01-E03.mkv`, which Plex reads as all three. The poster comes
-from TMDb's tv endpoint —
-fetched once per season, cached as `poster.jpg` in the raw folder so every
-episode reuses it.
+A season, one disc at a time — rip, check the names, convert:
 
-Useful flags:
-
-```bash
-.\Scripts\ConvertNext.ps1 -Watch                # keep polling for new raw folders
-.\Scripts\ConvertNext.ps1 -Watch -PollSeconds 300  # how long -Watch waits between looks (default 60)
-.\Scripts\ConvertNext.ps1 -Only "Kiki"          # restrict to one raw subfolder
-.\Scripts\ConvertNext.ps1 -SkipSubtitles        # H.265 encode only, no OCR
-.\Scripts\ConvertNext.ps1 -ReplaceBitmapSubs    # keep only the OCR'd SRT, drop the bitmap tracks
-.\Scripts\ConvertNext.ps1 -SkipPoster           # don't fetch/attach a poster
-.\Scripts\ConvertNext.ps1 -FetchPoster "Kiki"   # (re)fetch poster only, pass "all" for every converted file
-.\Scripts\ConvertNext.ps1 -FetchPoster "Kiki" -Title "Kiki's Delivery Service"   # ...searching TMDb for this, not the folder name
-.\Scripts\ConvertNext.ps1 -RedoSubtitles "Kiki" # redo OCR+remux, pass "all" for every converted file
-.\Scripts\ConvertNext.ps1 -MarkDone "Kiki"      # mark a folder converted without encoding
-.\Scripts\ConvertNext.ps1 -ShowToolOutput       # also put the tools' own output on screen
+```powershell
+.\Scripts\RipDisc.ps1 -Title The_Crown_S01 -Index 1   # disc 1
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01              # dry run, read it
+.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute     # apply
+.\Scripts\ConvertNext.ps1 -Watch
 ```
 
-Between them HandBrake, seconv and mkvmerge print a few hundred lines per
-file, so that goes to a log beside the raw file — `E02.mkv.log`, appended
-to, one block per tool per run — and the console gets one line per step,
-with the encode percentage rewriting itself in place:
+Before ripping a series, lower `MinLengthSeconds` to about `1200` in
+`config.json` — at the default `3600` a 47-minute episode is skipped.
 
-```
- Downton_Abbey_S06\E02.mkv -> Downton Abbey - S06E02.mkv
-   encode  18m04s, 1,80 GB -> 0,74 GB
-   subs    2 of 2 tracks OCR'd and remuxed, bitmap subs kept too
-   poster  poster.jpg attached
-   done    I:\Video\Downton Abbey - S06E02.mkv
-```
+## Documentation
 
-A step that fails prints the tail of the log with it. `-ShowToolOutput`
-streams everything to the console as well.
-
-OCR covers the languages in `SubtitleLanguages` — the same ones HandBrake
-keeps, since an SRT for a track that isn't in the output is just a slow way
-to produce nothing. Each needs its Tesseract data file: with only
-`eng.traineddata` and `fin.traineddata` installed, `seconv` cannot address a
-Danish or Dutch track at all (it reports "No subtitle tracks matched", which
-says nothing about the real cause), so the script checks for the file first
-and names what's missing.
-
-By default the OCR'd SRT tracks are added *alongside* the original bitmap
-(VobSub) ones, so nothing is lost; `-ReplaceBitmapSubs` drops the bitmaps
-and keeps the text. `-Title` only applies to `-FetchPoster` — it is the TMDb
-search term, for when the folder name isn't the film's title. In a normal
-convert run the folder name is used, and so is any jpg/png already sitting
-in the raw folder (see `FetchPosterPreview.ps1` below).
-
-**Preview posters before converting** — fetch a TMDb candidate into every
-raw disc folder that doesn't already have one, so you can check (or swap)
-it before `ConvertNext.ps1` bakes it into the mkv (which uses any jpg/png
-already sitting there instead of asking TMDb):
-
-```bash
-.\Scripts\FetchPosterPreview.ps1                                     # all raw folders missing a poster
-.\Scripts\FetchPosterPreview.ps1 -DirName "Kiki"                     # just that one
-.\Scripts\FetchPosterPreview.ps1 -DirName "Kiki" -Title "Kiki's Delivery Service"
-```
-
-Never overwrites a folder that already has an image. Saves as
-`poster.jpg` otherwise. Delete or replace it there if it's wrong —
-whatever's left when you run `ConvertNext.ps1` becomes the cover.
-
-**Fix posters** — disc folder names don't always match TMDb's title, so
-the auto-guessed poster can be wrong. Drop a better image into the raw
-disc folder (replacing the one already there) and re-apply it:
-
-```bash
-.\Scripts\FixPosters.ps1                  # every converted file with a poster in its raw folder
-.\Scripts\FixPosters.ps1 -DirName "Kiki"  # just that one raw folder
-```
-
-Walks every raw folder under `VideoRoot`, and for each raw mkv that is
-marked converted and whose converted output exists, copies that folder's
-jpg/jpeg/png next to the converted mkv (named after it) and re-attaches it
-as the mkv's cover, replacing the old attachment. Raw folders with no
-image, files not yet converted, and files whose converted output is
-missing are all skipped — nothing is fetched from TMDb here. Accepts
-`.jpg`/`.jpeg`/`.png`.
+The `docs/` folder holds one markdown file per script, named after it, plus
+[docs/Configuration.md](docs/Configuration.md) for the config keys and
+[docs/tasks/](docs/tasks/) for the backlog. `Scripts/Test-Docs.ps1` checks
+that every script with parameters has comment-based help covering each one, a
+markdown file of its own, and no broken relative links.

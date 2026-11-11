@@ -1,15 +1,7 @@
 # ==============================================================================
 # Shared config loader and naming helpers - dot-source this from other scripts.
-#
-# Each script defines its own defaults as a hashtable and calls Get-RipConfig
-# with them. If config.json exists next to the scripts, matching keys there
-# override the defaults; anything config.json doesn't mention keeps its
-# default. config.json is optional - skip it and everything just uses
-# defaults as before.
-#
-# config.json is shared across all scripts, so it can hold keys a given
-# script doesn't use (e.g. RipDisc.ps1 ignores ConvertNext.ps1's keys) -
-# that's expected, not an error.
+# It takes no parameters, so it has no comment-based help; the keys and how
+# they are resolved are documented in docs/Configuration.md.
 #
 # Usage (in another script):
 #   . (Join-Path $PSScriptRoot "Config.ps1")
