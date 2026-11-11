@@ -66,7 +66,10 @@ file: [documentation.md](documentation.md)
 - Root readme could just contain short instructions and reference other md files.
 - would it make sense to have md named like the script?
 
-### simplify scripts [planning, low]
+### simplify scripts [planned, low]
+
+file: [simplify-scripts.md](simplify-scripts.md)
+
 - suggest how to simplify scripts
 - what features can be dropped?
 - is there an optional feature that would remove much code from scripts?
