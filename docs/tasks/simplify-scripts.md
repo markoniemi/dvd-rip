@@ -1,6 +1,6 @@
 ---
 id: simplify-scripts
-status: planned
+status: in_progress
 priority: low
 kind: task
 branch: task/simplify-scripts
@@ -114,15 +114,21 @@ deletes code rather than adding it. The honest check is that
 which needs a raw rip folder to run against, and so is a step for the
 human or for a disc left in the drive.
 
-## Open questions for the human
+## Answers
 
-1. **Which of Step 2's features go?** Each is a separate yes/no. My
-   recommendation: keep `-Split`/`-SplitAt` (it earned its place on
-   Downton), drop `-MarkDone` (its one-off job is done), keep the rest.
-2. **Is `NameEpisodes.ps1`'s main body in scope** (Step 3.3), or does that
-   want a task of its own? It is the one change here that could break the
-   arithmetic, and nothing tests it.
-3. **Anything to do about the posters already on disk?** Doing nothing
-   leaves every converted file with its cover and its sidecar jpg, which
-   is what I would suggest. The alternative — stripping them — is a
-   separate decision and a separate task.
+Decided by the human:
+
+* **Drop** the poster feature (Step 1), and from Step 2 **`-RedoSubtitles`,
+  `-MarkDone` and `-Split`/`-SplitAt`**.
+* **Keep** `-Watch`/`-PollSeconds`, and the log with `-ShowToolOutput`.
+* `NameEpisodes.ps1`'s main body (Step 3.3) is **out of scope**: it became
+  the backlog entry `restructure NameEpisodes`, so my recommendation to
+  keep `-Split` was overruled and that is the decision.
+* Nothing is done about the posters already on disk — every converted file
+  keeps its cover and its sidecar jpg.
+
+Note on dropping `-Split`: the chapter arithmetic that *classifies* a Play
+All stays, because that is how a title is recognised at all. Only the
+cutting goes, so a range-named file is reported and left whole, which is
+what it did before `-Split` existed. `ConvertNext.ps1` still names it
+`<Show> - S01E01-E03.mkv`.

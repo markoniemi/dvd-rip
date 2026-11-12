@@ -66,7 +66,7 @@ file: [documentation.md](documentation.md)
 - Root readme could just contain short instructions and reference other md files.
 - would it make sense to have md named like the script?
 
-### simplify scripts [planned, low]
+### simplify scripts [in_progress, low]
 
 file: [simplify-scripts.md](simplify-scripts.md)
 
@@ -74,3 +74,14 @@ file: [simplify-scripts.md](simplify-scripts.md)
 - what features can be dropped?
 - is there an optional feature that would remove much code from scripts?
 - poster image feature can be dropped.
+
+### restructure NameEpisodes [draft, low]
+
+Split off from `simplify scripts`, which left it alone deliberately.
+
+`NameEpisodes.ps1` is ~970 lines, of which the last ~500 are one
+straight-line main body after the final function. Splitting it into named
+passes - read facts, classify, plan renames, report or apply - is what
+would make it readable. It is also the riskiest change in the repo: it
+holds the duration and chapter arithmetic, and nothing tests it. Worth
+considering what a test harness for it would look like first.
