@@ -77,6 +77,8 @@ file: [simplify-scripts.md](simplify-scripts.md)
 
 ### restructure NameEpisodes [draft, low]
 
+file: [restructure-nameepisodes.md](restructure-nameepisodes.md)
+
 Split off from `simplify scripts`, which left it alone deliberately.
 
 `NameEpisodes.ps1` is ~970 lines, of which the last ~500 are one
