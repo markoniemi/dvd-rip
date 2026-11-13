@@ -30,7 +30,7 @@ function Get-RipConfig([hashtable]$Defaults) {
 }
 
 # ==============================================================================
-# TV series naming, shared by RipDisc.ps1 / ConvertNext.ps1 / FetchPosterPreview.ps1.
+# TV series naming, shared by RipDisc.ps1 / ConvertNext.ps1 / NameEpisodes.ps1.
 #
 # A raw folder named "<Show>_S<season>" (e.g. "The_Crown_S01", "TheCrownS01")
 # is a TV season rather than a movie. RipDisc.ps1 -Index names the files in it

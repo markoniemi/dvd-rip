@@ -8,7 +8,6 @@ title order. The flags are documented in the script:
 ```powershell
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01                  # dry run
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Execute         # apply
-.\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute  # cut Play Alls up
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Index 5         # first episode is 5
 .\Scripts\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work    # look here, not in VideoRoot
 ```
@@ -69,31 +68,29 @@ that as given.
 Without `-Index` the first episode number continues from the highest `E##`
 file already in the folder, so the next disc of a season needs no argument.
 
-## -SplitAt, for the discs the arithmetic can't settle
+## Nothing is cut
 
-`-SplitAt` is the last word on where a range-named file is cut: Downton Abbey
-season 4 disc 1 is 20 chapters holding three episodes, which no even division
-fits and no other title on the disc anchors. Give the chapter numbers to cut
-BEFORE. Without a file name it applies to the one range-named file that needs
-it, and says so rather than guessing when several could.
+This script only renames and moves. It used to be able to cut a Play All into
+single episodes with mkvmerge (`-Split`), and to be told where to cut
+(`-SplitAt`); both went in the `simplify scripts` task. The chapter arithmetic
+that works out where the episodes inside a Play All begin stays, because that
+is how one is recognised at all — it is printed as evidence and nothing acts
+on it.
+
+To cut one by hand, the chapter numbers are in the `--- titles ---` line for
+that file:
 
 ```powershell
-.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt 9,15
-.\Scripts\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt "E01-E03=9,15","E07-E08=7"
+mkvmerge -o part.mkv --split chapters:9,15 "E01-E03.mkv"
 ```
-
-The chapter numbers are taken as given — only impossible ones are refused — so
-the plan is worth reading before adding `-Execute`.
 
 ## Play All titles and _extra\
 
-By default they are kept whole. One holding episodes nobody else covers is
-named for its range (`E01-E03.mkv`, which `ConvertNext.ps1` turns into
+They are kept whole. One holding episodes nobody else covers is named for its
+range (`E01-E03.mkv`, which `ConvertNext.ps1` turns into
 `<Show> - S01E01-E03.mkv`); one whose episodes all exist on their own is
 redundant and moves to `_extra\` (`ConvertNext.ps1` scans only the top level
-of a raw folder, so `_extra\` is ignored). With `-Split` it is cut into single
-episodes at its chapter boundaries with mkvmerge - lossless, no re-encode -
-and the original then moves to `_extra\`.
+of a raw folder, so `_extra\` is ignored).
 
 A standalone episode that a Play All also holds keeps its number; the Play
 All's copy of it goes to `_extra\`.

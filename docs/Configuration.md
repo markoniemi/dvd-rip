@@ -34,9 +34,7 @@ one only if you keep the key somewhere else, as an absolute path), and has
 | `Seconv_Exe` | `…\Subtitle Edit\seconv.exe` | Subtitle OCR CLI |
 | `MkvMerge_Exe` | `…\MKVToolNix\mkvmerge.exe` | Remux, and the chapter split in `NameEpisodes.ps1` |
 | `MkvExtract_Exe` | `…\MKVToolNix\mkvextract.exe` | Reads chapter marks for `NameEpisodes.ps1` |
-| `MkvPropEdit_Exe` | `…\MKVToolNix\mkvpropedit.exe` | Attaches the poster |
 | `TesseractDir` | `…\Tesseract-OCR` | Added to `PATH` so `seconv` can shell out to it |
-| `TmdbApiKeyFile` | `Scripts\tmdb_api_key.txt` | Where the TMDb key is read from (absolute path if you move it) |
 | `StableSeconds` | `30` | Ignore files written more recently than this — a rip still running |
 | `DefaultOcrLanguage` | `fin` | OCR language for a subtitle track tagged `und` or nothing |
 | `AudioLanguages` | `fin,eng,jpn` | HandBrake `--audio-lang-list` |
@@ -46,17 +44,13 @@ one only if you keep the key somewhere else, as an absolute path), and has
 | `MultiEpisodeRatio` | `1.8` | `NameEpisodes.ps1`: this many times the folder's median episode (or that fraction of it) is reported rather than numbered |
 | `DurationToleranceSeconds` | `3` | `NameEpisodes.ps1`: how far two durations may differ and still count as equal |
 
-## The TMDb API key
+No API key is needed any more: the poster feature that used
+`tmdb_api_key.txt` and `TmdbApiKeyFile` went in the `simplify scripts` task.
+`.gitignore` still covers that file, so an old copy of it can sit next to the
+scripts without any risk of being committed.
 
-1. Create a free account at [themoviedb.org](https://www.themoviedb.org/).
-2. Go to **Settings → API**
-   ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api))
-   and request a free API key (choose "Developer" use).
-3. Save the key as plain text in `Scripts/tmdb_api_key.txt` (just the key,
-   nothing else). This file is gitignored — never commit it.
-
-Posters are best-effort: if the key is missing, `ConvertNext.ps1` still runs,
-it just skips the poster step.
+`config.example.json` carries no `MkvPropEdit_Exe` either — nothing calls
+mkvpropedit now.
 
 ## How the loader works
 

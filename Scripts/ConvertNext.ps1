@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Convert queue: encode pending raw rips to H.265, OCR their subtitles and
-    attach a poster. Run alongside RipDisc.ps1.
+    Convert queue: encode pending raw rips to H.265 and OCR their subtitles.
+    Run alongside RipDisc.ps1.
 
 .DESCRIPTION
     Scans VideoRoot for raw rip subfolders and, for every *.mkv in them not
@@ -10,17 +10,13 @@
     never touched or deleted.
 
     See docs/ConvertNext.md for the output naming rules, the .converted
-    marker, the per-file log, the subtitle languages and the poster rules.
+    marker, the per-file log and the subtitle languages.
 
 .PARAMETER Watch
     Keep polling for new raw folders instead of exiting when the queue drains.
 
 .PARAMETER PollSeconds
     How long -Watch waits between looks. Default 60.
-
-.PARAMETER MarkDone
-    Mark every file in that raw subfolder as already converted, without
-    encoding.
 
 .PARAMETER SkipSubtitles
     H.265 encode only, no OCR pass.
@@ -30,21 +26,6 @@
 
 .PARAMETER Only
     Restrict this run to one raw subfolder, by name.
-
-.PARAMETER RedoSubtitles
-    Redo OCR and remux on an already-converted file, with no re-encode. Pass
-    "all" to redo every converted file.
-
-.PARAMETER SkipPoster
-    Don't fetch or attach a poster image.
-
-.PARAMETER FetchPoster
-    (Re)fetch the poster for an already-converted file, touching neither video
-    nor subtitles. Pass "all" to backfill every one.
-
-.PARAMETER Title
-    The TMDb search term for -FetchPoster, for when the folder name isn't the
-    film's title. It applies to nothing else.
 
 .PARAMETER ShowToolOutput
     Also put the tools' own output on screen, as well as in the log.
@@ -61,10 +42,6 @@
     .\ConvertNext.ps1 -Only "Kiki" -ReplaceBitmapSubs
     One raw subfolder, keeping only the OCR'd SRT tracks.
 
-.EXAMPLE
-    .\ConvertNext.ps1 -FetchPoster "Kiki" -Title "Kiki's Delivery Service"
-    Re-fetch just the poster, searching TMDb for that title.
-
 .LINK
     docs/ConvertNext.md
 #>
@@ -72,14 +49,9 @@
 param(
     [switch]$Watch,
     [int]$PollSeconds = 60,
-    [string]$MarkDone,
     [switch]$SkipSubtitles,
     [switch]$ReplaceBitmapSubs,
     [string]$Only,
-    [string]$RedoSubtitles,
-    [switch]$SkipPoster,
-    [string]$FetchPoster,
-    [string]$Title,
     [switch]$ShowToolOutput
 )
 
@@ -89,9 +61,7 @@ $cfg = Get-RipConfig @{
     HandBrake_Exe     = "C:\Program Files\HandBrake\HandBrakeCLI.exe"
     Seconv_Exe        = "C:\Program Files\Subtitle Edit\seconv.exe"
     MkvMerge_Exe      = "C:\Program Files\MKVToolNix\mkvmerge.exe"
-    MkvPropEdit_Exe   = "C:\Program Files\MKVToolNix\mkvpropedit.exe"
     TesseractDir      = "C:\Program Files\Tesseract-OCR"
-    TmdbApiKeyFile    = Join-Path $PSScriptRoot "tmdb_api_key.txt"
     StableSeconds     = 30   # skip files still being written (e.g. rip in progress)
     DefaultOcrLanguage = "fin"
     AudioLanguages    = "fin,eng,jpn"   # HandBrake --audio-lang-list
@@ -101,9 +71,7 @@ $VideoRoot       = $cfg.VideoRoot
 $HandBrake_Exe   = $cfg.HandBrake_Exe
 $Seconv_Exe      = $cfg.Seconv_Exe
 $MkvMerge_Exe    = $cfg.MkvMerge_Exe
-$MkvPropEdit_Exe = $cfg.MkvPropEdit_Exe
 $TesseractDir    = $cfg.TesseractDir
-$TmdbApiKeyFile  = $cfg.TmdbApiKeyFile
 $StableSeconds   = $cfg.StableSeconds
 $AudioLanguages    = $cfg.AudioLanguages
 $SubtitleLanguages = $cfg.SubtitleLanguages
@@ -112,9 +80,6 @@ $SubtitleLanguages = $cfg.SubtitleLanguages
 if ((Test-Path $TesseractDir) -and ($env:PATH -notlike "*$TesseractDir*")) {
     $env:PATH = "$env:PATH;$TesseractDir"
 }
-
-$TmdbApiKey = $null
-if (Test-Path $TmdbApiKeyFile) { $TmdbApiKey = (Get-Content $TmdbApiKeyFile -Raw).Trim() }
 
 function Get-MarkerPath($file) { "$($file.FullName).converted" }
 
@@ -216,157 +181,6 @@ function Get-OutputPath($dir, $raw, $multiple) {
         $outBase = $dir.Name
     }
     return Join-Path $VideoRoot "$outBase.mkv"
-}
-
-# Turns a raw disc folder name into a plausible movie title to search TMDb with.
-function Get-MovieTitleGuess($dirName) {
-    $t = $dirName -replace '_', ' '
-    $t = $t -replace '\s+ekstrat$', ''       # "Prinsessa Mononoke ekstrat" (Finnish: extras disc)
-    $t = $t -replace '\s+\d{4}$', ' $0'       # keep trailing year as-is, just tidy spacing
-    return $t.Trim()
-}
-
-# Searches TMDb for $title and downloads its poster to $jpgPath. $searchType is
-# the TMDb endpoint to use: "movie", or "tv" for a series. Best-effort: returns
-# $false (and leaves no file) on any failure - never throws.
-function Get-MoviePoster($title, $jpgPath, $searchType = "movie") {
-    if (-not $TmdbApiKey) { return $false }
-    try {
-        $query = [uri]::EscapeDataString($title)
-        $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query&language=fi-FI" -ErrorAction Stop
-        if (-not $resp.results -or $resp.results.Count -eq 0) {
-            $resp = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/search/$searchType`?api_key=$TmdbApiKey&query=$query" -ErrorAction Stop
-        }
-        if (-not $resp.results -or $resp.results.Count -eq 0) {
-            Write-Step "poster" "no TMDb match for '$title'"
-            return $false
-        }
-
-        $posterPath = $resp.results[0].poster_path
-        if (-not $posterPath) {
-            Write-Step "poster" "TMDb match for '$title' has no poster image"
-            return $false
-        }
-
-        Invoke-WebRequest -Uri "https://image.tmdb.org/t/p/w780$posterPath" -OutFile $jpgPath -ErrorAction Stop
-        return $true
-    } catch {
-        Write-Step "poster" "TMDb fetch failed for '$title': $_"
-        return $false
-    }
-}
-
-function Get-ImageMimeType($ext) {
-    switch ($ext.TrimStart('.').ToLowerInvariant()) {
-        "jpg"  { return "image/jpeg" }
-        "jpeg" { return "image/jpeg" }
-        "png"  { return "image/png" }
-        default { return $null }
-    }
-}
-
-# Attaches $imagePath into $mkvPath as a "cover.<ext>" attachment, replacing
-# any previous cover (jpg or png) so reruns/format switches don't pile up
-# duplicates.
-function Set-CoverArt($mkvPath, $imagePath, $logPath) {
-    if (-not (Test-Path $imagePath)) { return $false }
-    $ext = [System.IO.Path]::GetExtension($imagePath).TrimStart('.').ToLowerInvariant()
-    $mimeType = Get-ImageMimeType $ext
-    if (-not $mimeType) {
-        Write-Step "poster" "unsupported image type '.$ext' - not attaching"
-        return $false
-    }
-    $propArgs = @("$mkvPath", "--delete-attachment", "name:cover.jpg", "--delete-attachment", "name:cover.png",
-                  "--attachment-name", "cover.$ext", "--attachment-mime-type", $mimeType,
-                  "--add-attachment", "$imagePath")
-    # mkvpropedit, like mkvmerge: 0 = ok, 1 = ok with warnings (it warns when
-    # there was no old cover to delete, which is the normal first-time case),
-    # 2 = failure.
-    $code = Invoke-Logged $MkvPropEdit_Exe $propArgs $logPath "mkvpropedit (cover art)"
-    if ($code -gt 1) {
-        Write-Step "poster" "mkvpropedit failed (exit $code) - cover not attached"
-        Show-LogTail $logPath 8
-        return $false
-    }
-    return $true
-}
-
-# A jpg/png already sitting in the raw disc folder (dropped there by hand)
-# wins over TMDb - lets you pre-seed the right cover for discs TMDb can't
-# guess from the folder name. Picks the first match if there's more than one.
-function Get-LocalPosterImage($rawDirPath) {
-    if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
-    return Get-ChildItem -Path (Join-Path $rawDirPath "*") -File -Include "*.jpg", "*.jpeg", "*.png" | Select-Object -First 1
-}
-
-# One poster for a whole TV season, fetched once and cached in the raw folder
-# as poster.jpg - the same file FetchPosterPreview.ps1 writes and
-# Get-LocalPosterImage looks for, so the remaining episodes of the season reuse
-# it instead of hitting TMDb once per file. Returns the cached file, or $null.
-function Get-SeriesPosterImage($show, $rawDirPath) {
-    if (-not $rawDirPath -or -not (Test-Path $rawDirPath)) { return $null }
-    $posterFile = Join-Path $rawDirPath "poster.jpg"
-    if (-not (Get-MoviePoster $show $posterFile "tv")) {
-        # A download that died halfway would otherwise leave a broken poster.jpg
-        # behind, and every later episode of the season would reuse it.
-        Remove-Item -Path $posterFile -Force -ErrorAction SilentlyContinue
-        return $null
-    }
-    return Get-Item -LiteralPath $posterFile
-}
-
-# Best-effort: sidecar image + mkv cover attachment for one movie or episode.
-# Uses a jpg/png already in $rawDirPath if there is one; otherwise fetches from
-# TMDb - the tv endpoint for a season folder (see Get-SeriesInfo in Config.ps1),
-# the movie endpoint for anything else. Never blocks the caller on failure.
-function Add-PosterArt($dirName, $targetMkvPath, $rawDirPath, $logPath) {
-    if ($SkipPoster) { return }
-
-    $localImage = Get-LocalPosterImage $rawDirPath
-
-    # A season folder gets one series poster, cached as poster.jpg, which the
-    # local-image branch below then uses for this and every later episode.
-    if (-not $localImage -and $TmdbApiKey) {
-        $series = Get-SeriesInfo $dirName
-        if ($series) { $localImage = Get-SeriesPosterImage $series.Show $rawDirPath }
-    }
-
-    if ($localImage) {
-        $posterPath = [System.IO.Path]::ChangeExtension($targetMkvPath, $localImage.Extension.TrimStart('.'))
-        Copy-Item -Path $localImage.FullName -Destination $posterPath -Force
-        if (Set-CoverArt $targetMkvPath $posterPath $logPath) {
-            Write-Step "poster" "$($localImage.Name) attached"
-        }
-        return
-    }
-
-    if (-not $TmdbApiKey) { return }
-
-    # Season folder with no poster: the tv lookup above already failed, and a
-    # movie search for "The_Crown_S01" would only find nonsense.
-    if (Get-SeriesInfo $dirName) { return }
-
-    $jpgPath = [System.IO.Path]::ChangeExtension($targetMkvPath, "jpg")
-    $title = Get-MovieTitleGuess $dirName
-
-    if (-not (Get-MoviePoster $title $jpgPath)) { return }
-    if (Set-CoverArt $targetMkvPath $jpgPath $logPath) {
-        Write-Step "poster" "TMDb poster for '$title' attached"
-    }
-}
-
-if ($MarkDone) {
-    $dir = Join-Path $VideoRoot $MarkDone
-    if (!(Test-Path $dir)) {
-        Write-Host "Error: folder not found: $dir"
-        exit 1
-    }
-    $files = Get-ChildItem -Path $dir -Filter "*.mkv" -File
-    foreach ($f in $files) {
-        New-Item -ItemType File -Path (Get-MarkerPath $f) -Force | Out-Null
-        Write-Host " Marked converted: $($f.FullName)"
-    }
-    exit 0
 }
 
 # Default OCR language when a track's own language tag is missing/"und".
@@ -504,103 +318,6 @@ function Add-OcrSubtitles($rawPath, $targetMkvPath, $logPath) {
     }
 }
 
-if ($RedoSubtitles) {
-    $targetDirs = Get-ChildItem -Path $VideoRoot -Directory | Sort-Object Name
-    if ($RedoSubtitles -ne "all") { $targetDirs = $targetDirs | Where-Object { $_.Name -eq $RedoSubtitles } }
-    if (-not $targetDirs) {
-        Write-Host "Error: folder not found: $RedoSubtitles"
-        exit 1
-    }
-
-    foreach ($dir in $targetDirs) {
-        $rawFiles = Get-ChildItem -Path $dir.FullName -Filter "*.mkv" -File
-        if (-not $rawFiles) { continue }
-        $multiple = $rawFiles.Count -gt 1
-
-        foreach ($raw in $rawFiles) {
-            if (-not (Test-Path (Get-MarkerPath $raw))) {
-                Write-Host " Skipping (not converted yet): $($raw.FullName)"
-                continue
-            }
-
-            $outPath = Get-OutputPath $dir $raw $multiple
-            if (-not (Test-Path $outPath)) {
-                Write-Host " Skipping (output file missing): $outPath"
-                continue
-            }
-
-            $json = & $MkvMerge_Exe -J "$outPath" 2>$null | ConvertFrom-Json
-            $vobsubIds = $json.tracks | Where-Object { $_.type -eq "subtitles" -and $_.codec -eq "VobSub" } | ForEach-Object { $_.id }
-            $hasSrt = $json.tracks | Where-Object { $_.type -eq "subtitles" -and $_.codec -ne "VobSub" }
-
-            if (-not $hasSrt) {
-                Write-Host " No OCR'd subtitle track found, nothing to redo: $outPath"
-                continue
-            }
-
-            $logPath = Get-LogPath $raw
-            Write-Host ""
-            Write-Host " redoing subtitles: $(Split-Path $outPath -Leaf)"
-            Write-Log $logPath ("##### ConvertNext -RedoSubtitles $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $outPath")
-
-            $stripped = "$outPath.stripped.tmp.mkv"
-            $stripArgs = if ($vobsubIds) {
-                @("-o", "$stripped", "-s", ($vobsubIds -join ","), "$outPath")
-            } else {
-                @("-o", "$stripped", "--no-subtitles", "$outPath")
-            }
-            $code = Invoke-Logged $MkvMerge_Exe $stripArgs $logPath "mkvmerge (strip old subtitle tracks)"
-
-            if ($code -gt 1 -or -not (Test-Path $stripped)) {
-                Write-Step "subs" "could not strip the old subtitle track (exit $code) - skipped"
-                Show-LogTail $logPath 8
-                Remove-Item -Path $stripped -Force -ErrorAction SilentlyContinue
-                continue
-            }
-
-            Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $stripped -logPath $logPath
-
-            Move-Item -Path $stripped -Destination $outPath -Force
-            Write-Step "done" $outPath
-        }
-    }
-    exit 0
-}
-
-if ($FetchPoster) {
-    $targetDirs = Get-ChildItem -Path $VideoRoot -Directory | Sort-Object Name
-    if ($FetchPoster -ne "all") { $targetDirs = $targetDirs | Where-Object { $_.Name -eq $FetchPoster } }
-    if (-not $targetDirs) {
-        Write-Host "Error: folder not found: $FetchPoster"
-        exit 1
-    }
-
-    foreach ($dir in $targetDirs) {
-        $rawFiles = Get-ChildItem -Path $dir.FullName -Filter "*.mkv" -File
-        if (-not $rawFiles) { continue }
-        $multiple = $rawFiles.Count -gt 1
-
-        foreach ($raw in $rawFiles) {
-            if (-not (Test-Path (Get-MarkerPath $raw))) {
-                Write-Host " Skipping (not converted yet): $($raw.FullName)"
-                continue
-            }
-
-            $outPath = Get-OutputPath $dir $raw $multiple
-            if (-not (Test-Path $outPath)) {
-                Write-Host " Skipping (output file missing): $outPath"
-                continue
-            }
-
-            Write-Host ""
-            Write-Host " poster for: $(Split-Path $outPath -Leaf)"
-            $posterTitle = if ($Title) { $Title } else { $dir.Name }
-            Add-PosterArt -dirName $posterTitle -targetMkvPath $outPath -rawDirPath $dir.FullName -logPath (Get-LogPath $raw)
-        }
-    }
-    exit 0
-}
-
 function Invoke-ConvertPass {
     $didWork = $false
     $rawDirs = Get-ChildItem -Path $VideoRoot -Directory | Sort-Object Name
@@ -650,8 +367,6 @@ function Invoke-ConvertPass {
                 if (-not $SkipSubtitles) {
                     Add-OcrSubtitles -rawPath $raw.FullName -targetMkvPath $outPath -logPath $logPath
                 }
-
-                Add-PosterArt -dirName $dir.Name -targetMkvPath $outPath -rawDirPath $dir.FullName -logPath $logPath
 
                 New-Item -ItemType File -Path $marker -Force | Out-Null
                 Write-Step "done" $outPath

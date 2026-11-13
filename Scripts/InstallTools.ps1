@@ -101,4 +101,4 @@ if (-not $SkipSubtitleEdit -and -not (Test-Path $cfg.Seconv_Exe)) {
 }
 
 Write-Host ""
-Write-Host "Done. Remember to also set up Scripts\tmdb_api_key.txt (see docs\Configuration.md) for poster fetching."
+Write-Host "Done."

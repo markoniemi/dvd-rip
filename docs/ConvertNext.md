@@ -1,7 +1,7 @@
 # ConvertNext.ps1
 
-Encodes any raw rip not yet converted, OCRs its subtitles, and attaches a
-TMDb poster. The flags are documented in the script:
+Encodes any raw rip not yet converted and OCRs its subtitles. The flags are
+documented in the script:
 `Get-Help .\Scripts\ConvertNext.ps1 -Full`.
 
 ```powershell
@@ -39,18 +39,24 @@ produces such a folder; see `Get-SeriesInfo` in `Config.ps1`.
 file: `<file>.mkv.converted`. That survives reruns and doesn't care whether a
 flat output file of a similar name already exists.
 
+There is no flag for writing one by hand any more (`-MarkDone` went in the
+`simplify scripts` task). A run that finds the output file already there
+marks the raw file converted and moves on, which covers the same ground; to
+force it, create the `.converted` file yourself, and to redo a file, delete
+both it and the output.
+
 ## Console output and the log
 
 Between them HandBrake, seconv and mkvmerge print a few hundred lines per
 file, so that goes to a log beside the raw file — `E02.mkv.log`, appended to,
-one block per tool per run — and the console gets one line per step, with the
-encode percentage rewriting itself in place:
+one block per tool per run — and the console gets one line per step (there
+used to be a `poster` line too), with the encode percentage rewriting itself
+in place:
 
 ```
  Downton_Abbey_S06\E02.mkv -> Downton Abbey - S06E02.mkv
    encode  18m04s, 1,80 GB -> 0,74 GB
    subs    2 of 2 tracks OCR'd and remuxed, bitmap subs kept too
-   poster  poster.jpg attached
    done    I:\Video\Downton Abbey - S06E02.mkv
 ```
 
@@ -71,26 +77,22 @@ By default the OCR'd SRT tracks are added *alongside* the original bitmap
 (VobSub) ones, so nothing is lost; `-ReplaceBitmapSubs` drops the bitmaps and
 keeps the text.
 
+Redoing the OCR on a file that is already converted has no flag of its own
+either (`-RedoSubtitles` went the same way): delete the output file and the
+raw file's `.converted` marker, and the next run does the whole file again,
+encode included.
+
 ## Posters
 
-If a `.jpg`/`.jpeg`/`.png` is sitting in the raw disc folder, that wins and
-gets used as-is (drop one there by hand to fix a bad TMDb guess up front, or
-see [FetchPosterPreview.ps1](FetchPosterPreview.md)). Otherwise it's fetched
-from TMDb - the tv endpoint for a season folder, cached as `poster.jpg` in the
-raw folder so every episode of that season reuses one lookup, the movie
-endpoint for anything else. TMDb needs a free API key saved as plain text in
-`tmdb_api_key.txt` next to the scripts
-(https://www.themoviedb.org/settings/api; see
-[Configuration.md](Configuration.md)).
+There are none. The script used to fetch a TMDb poster, write it beside the
+mkv and attach it as the mkv's cover; that went in the `simplify scripts`
+task, along with `FetchPosterPreview.ps1` and `FixPosters.ps1`. Plex and
+Jellyfin fetch their own artwork, and Windows Explorer never read the
+attachment or the sidecar jpg anyway (see
+[tasks/first-frame.md](tasks/first-frame.md)).
 
-Either way, the movie gets a sidecar image next to its mkv AND an embedded
-cover attachment in the mkv itself (via mkvpropedit) - best-effort, never
-blocks the rest of the pipeline on failure. Windows Explorer reads neither;
-see [tasks/first-frame.md](tasks/first-frame.md) for why that was left alone.
-
-`-Title` only applies to `-FetchPoster` — it is the TMDb search term, for when
-the folder name isn't the film's title. In a normal convert run the folder
-name is used.
+Files converted before that keep the cover and the sidecar jpg they already
+have. `git log` has the code if it is ever wanted back.
 
 ## Requires
 

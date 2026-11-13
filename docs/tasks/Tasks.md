@@ -66,7 +66,7 @@ file: [documentation.md](documentation.md)
 - Root readme could just contain short instructions and reference other md files.
 - would it make sense to have md named like the script?
 
-### simplify scripts [in_progress, low]
+### simplify scripts [done, low]
 
 file: [simplify-scripts.md](simplify-scripts.md)
 

@@ -15,7 +15,7 @@ Installs (skipping any that's already present at its expected path):
 
 - MakeMKV — `RipDisc.ps1`
 - HandBrakeCLI — `ConvertNext.ps1`, encode
-- MKVToolNix — `ConvertNext.ps1`/`FixPosters.ps1`, mkvmerge/mkvpropedit
+- MKVToolNix — `ConvertNext.ps1`/`NameEpisodes.ps1`, mkvmerge/mkvextract
 - Subtitle Edit — `ConvertNext.ps1`, seconv.exe OCR CLI
 - Tesseract OCR — `ConvertNext.ps1`, the OCR engine seconv shells out to
 
@@ -32,7 +32,7 @@ tells you to grab a newer installer manually from
 |---|---|---|
 | [MakeMKV](https://www.makemkv.com/) | Ripping the disc | Download installer from makemkv.com |
 | [HandBrakeCLI](https://handbrake.fr/downloads2.php) | H.265 encode | `winget install HandBrake.HandBrake.CLI` |
-| [MKVToolNix](https://mkvtoolnix.download/) | `mkvmerge`/`mkvpropedit` (remux subs, attach poster) | `winget install MoritzBunkus.MKVToolNix` |
+| [MKVToolNix](https://mkvtoolnix.download/) | `mkvmerge`/`mkvextract` (remux subs, read chapter marks) | `winget install MoritzBunkus.MKVToolNix` |
 | [Subtitle Edit](https://www.nikse.dk/subtitleedit) 5.4+ | `seconv.exe` CLI, OCRs bitmap (VobSub) subtitles | Download installer from nikse.dk (ships `seconv.exe` alongside the GUI from v5.4.0-beta5 on) |
 | [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | OCR engine `seconv` shells out to | `winget install tesseract-ocr.tesseract` |
 

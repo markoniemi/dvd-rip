@@ -1,6 +1,6 @@
 ---
 id: simplify-scripts
-status: in_progress
+status: done
 priority: low
 kind: task
 branch: task/simplify-scripts
@@ -114,7 +114,65 @@ deletes code rather than adding it. The honest check is that
 which needs a raw rip folder to run against, and so is a step for the
 human or for a disc left in the drive.
 
-## Answers
+## Result
+
+Three commits, one per decision. Script lines, counting non-blank lines as
+the table above does: **2276 → 1608, down 29%**, and seven scripts became
+five.
+
+| Commit | What went | Lines |
+| :- | :- | -: |
+| `0de842d` | the poster feature | −605 |
+| `ca8218c` | `-RedoSubtitles`, `-MarkDone` | −87 |
+| `be6ffef` | `-Split`, `-SplitAt` | −217 |
+
+* `ConvertNext.ps1` 585 → 341, `NameEpisodes.ps1` 973 → 806.
+* `FetchPosterPreview.ps1` and `FixPosters.ps1` are gone, with their two
+  markdown files.
+* Config keys `TmdbApiKeyFile` and `MkvPropEdit_Exe` are gone from the
+  scripts, `config.example.json` and `docs/Configuration.md`. `.gitignore`
+  still covers `tmdb_api_key.txt`, deliberately: an old key file can sit
+  there without any risk of being committed.
+* `NameEpisodes.ps1` keeps every bit of arithmetic that *classifies* a
+  title. What it lost is the cutting: a Play All is kept whole under its
+  range name, as before `-Split` existed, and the chapter boundaries it
+  works out are printed as evidence instead of acted on.
+
+Step 3 of the plan (the config-unpacking boilerplate, the shared naming
+helpers) was **not** done. Step 1 deleted the file that duplicated the
+naming rule, so that half of 3.2 solved itself; the `$cfg` unpacking is
+still there in every script, about 40 lines in all. It wants its own task
+if it is worth doing — it is the kind of change that touches every script
+for no behaviour difference.
+
+## How to review
+
+1. `.\Scripts\Test-Docs.ps1` — `checked 4 script(s) with parameters, 11
+   markdown file(s), 18 relative link(s)`, `all good`, exit 0. Run.
+2. `Get-Help .\Scripts\ConvertNext.ps1 -Full` — six parameters, no poster
+   or redo flags. `Get-Help .\Scripts\NameEpisodes.ps1 -Full` — four, no
+   `-Split`. Run, and the declared parameters match the documented ones
+   for all four scripts that take any.
+3. All six scripts tokenise without a parse error. Run.
+4. `NameEpisodes.ps1` was run for real, on audio-only copies cut out of
+   `Amelie.mkv` with mkvmerge (small, and they carry real durations and
+   chapter marks) in a scratch folder with `-Root`. Three paths, all
+   correct:
+   * three unnamed 16-minute titles → `E07.mkv`, `E08.mkv`, `E09.mkv`,
+     renames applied with `-Execute`, `rename-log.txt` written;
+   * a 48-minute title named `E04-E06.mkv` → classified `PlayAll`, kept
+     whole, "already correct";
+   * the same file renamed `E07-E09.mkv`, with all three episodes present
+     on their own → `_extra\PlayAll_E07-E09.mkv`.
+   * The gap warning fired each time, naming the missing numbers.
+5. Read `docs/ConvertNext.md` and `docs/NameEpisodes.md`: each dropped
+   flag has a line saying what to do instead (delete the marker and the
+   output; run mkvmerge `--split` by hand), rather than silently vanishing.
+
+Not run: `ConvertNext.ps1` was not executed. Its encode path is untouched
+by these commits except for the removal of the `Add-PosterArt` call, but
+nothing here proves it converts a file end to end — the next real rip is
+what proves that.
 
 Decided by the human:
 

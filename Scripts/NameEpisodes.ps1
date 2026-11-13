@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Name the raw titles in a TV season folder E01.mkv, E02.mkv, ... by
     arithmetic rather than by title order.
@@ -19,16 +19,8 @@
     The first episode number in this folder. Without it, numbering continues
     from the highest E## file already there.
 
-.PARAMETER Split
-    Cut Play All titles into single episodes at their chapter boundaries with
-    mkvmerge - lossless, no re-encode.
-
 .PARAMETER Execute
     Apply the plan. Without it the script only prints what it would do.
-
-.PARAMETER SplitAt
-    The chapters to cut a range-named file BEFORE, overriding whatever the
-    script worked out: "9,15", or "E01-E03=9,15" to name the file.
 
 .PARAMETER Root
     Look under this folder instead of VideoRoot (a staging folder).
@@ -46,16 +38,8 @@
     The first episode in the folder is 5.
 
 .EXAMPLE
-    .\NameEpisodes.ps1 -DirName The_Crown_S01 -Split -Execute
-    Cut the Play All titles into episodes.
-
-.EXAMPLE
     .\NameEpisodes.ps1 -DirName The_Crown_S01 -Root I:\Work
     Look under I:\Work, not VideoRoot.
-
-.EXAMPLE
-    .\NameEpisodes.ps1 -DirName Downton_Abbey_S04 -SplitAt "E01-E03=9,15","E07-E08=7"
-    Cut there, rather than working it out.
 
 .LINK
     docs/NameEpisodes.md
@@ -64,9 +48,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$DirName,
     [int]$Index = 0,
-    [switch]$Split,
     [switch]$Execute,
-    [string[]]$SplitAt,  # chapters to cut a range-named file at: "9,15" or "E01-E03=9,15"
     [string]$Root        # look under this instead of VideoRoot (a staging folder)
 )
 
@@ -295,67 +277,6 @@ function Find-PlayAllRun($item, $all) {
     return $null
 }
 
-# -SplitAt, as a map of file name (or "" for the unqualified form) to chapter
-# numbers. The whole argument is re-joined and re-split on commas first, so
-# -SplitAt 9,15 and -SplitAt "E01-E03=9,15","E07-E08=7" both come out right
-# whether or not PowerShell split the list on the commas itself.
-function Get-SplitOverrides([string[]]$spec) {
-    $map = [ordered]@{}
-    $key = ""
-
-    foreach ($token in (($spec -join ',') -split ',')) {
-        $token = $token.Trim()
-        if (-not $token) { continue }
-
-        if ($token -match '^(?<name>.+?)=(?<chapter>\d+)$') {
-            $key = $Matches.name.Trim()
-            $chapter = [int]$Matches.chapter
-        } elseif ($token -match '^\d+$') {
-            $chapter = [int]$token
-        } else {
-            Write-Host "Error: -SplitAt takes chapter numbers, optionally prefixed with a file name: 9,15 or `"E01-E03=9,15`". Can't read: $token"
-            exit 1
-        }
-
-        if (-not $map.Contains($key)) { $map[$key] = @() }
-        $map[$key] += $chapter
-    }
-    return $map
-}
-
-# Apply one -SplitAt entry to a range-named file. The chapters are the human's
-# word, so they are used as given; only what cannot possibly work is refused,
-# and a block that comes out an odd length is reported rather than rejected.
-function Set-ExplicitSplit($item, $chapters) {
-    $expected = $item.Tag.Last - $item.Tag.First
-    if ($chapters.Count -ne $expected) {
-        Write-Host ("Error: {0} holds {1} episodes, so -SplitAt needs {2} chapter number(s), not {3}: {4}" -f `
-            $item.File.Name, ($expected + 1), $expected, $chapters.Count, ($chapters -join ','))
-        exit 1
-    }
-
-    for ($i = 0; $i -lt $chapters.Count; $i++) {
-        if ($chapters[$i] -lt 2 -or $chapters[$i] -gt $item.Facts.Chapters) {
-            Write-Host ("Error: {0} has {1} chapters, so {2} can't be a cut point (2..{1})." -f `
-                $item.File.Name, $item.Facts.Chapters, $chapters[$i])
-            exit 1
-        }
-        if ($i -gt 0 -and $chapters[$i] -le $chapters[$i - 1]) {
-            Write-Host ("Error: -SplitAt chapters must increase: $($chapters -join ',')")
-            exit 1
-        }
-    }
-
-    $lengths = Get-BlockLengths $item.Facts $chapters
-    $item.SplitAt = $chapters
-    $item.Evidence = "already named $($item.Tag.Tag); -SplitAt ch $($chapters -join ',') = $(($lengths | ForEach-Object { Format-Length $_ }) -join ' + ')"
-
-    $odd = @($lengths | Where-Object { -not (Test-EpisodeLength $_) })
-    if ($odd) {
-        $item.Evidence += " - note $(($odd | ForEach-Object { Format-Length $_ }) -join ', ') isn't episode length"
-    }
-}
-
 # The length to judge "too long to be one episode" against: the median of the
 # episodes already pinned down. Named files count, so on the second disc of a
 # season the earlier discs set the yardstick; failing that, the episode-length
@@ -519,15 +440,14 @@ foreach ($item in $items) {
 
     # A range name states how many episodes are in there, which is the one
     # piece of information the arithmetic can't always recover on its own (see
-    # the "several readings" case below). Take it as given and work out the
-    # chapter boundaries from it.
+    # the "several readings" case below). Take it as given and work out where
+    # the episodes inside it begin. Nothing cuts the file any more - the
+    # boundaries are evidence that it really is a Play All, and get printed.
     if ($item.Tag.Last -gt $item.Tag.First) {
         $count = $item.Tag.Last - $item.Tag.First + 1
-        # Not $split: that would assign to the [switch]$Split parameter, which
-        # PowerShell matches case-insensitively and then refuses to convert.
         $rangeSplit = Get-RangeSplit $item $items $count
         if (-not $rangeSplit) {
-            $item.Evidence += "; $($item.Facts.Chapters) chapters don't resolve into $count episode-length blocks, so it can't be split"
+            $item.Evidence += "; $($item.Facts.Chapters) chapters don't resolve into $count episode-length blocks"
         } else {
             $lengths = Get-BlockLengths $item.Facts $rangeSplit.SplitAt
             $item.SplitAt = $rangeSplit.SplitAt
@@ -553,40 +473,6 @@ foreach ($item in @($items | Where-Object { $_.Tag -and $_.Tag.First -eq $_.Tag.
     $item.Episodes = @()        # the name was wrong, so that number is free again
     $item.Evidence = "named $($item.Tag.Tag), but holds $($item.Covers -join ' + ') mark for mark - a Play All, not one episode"
     $warnings += "$($item.File.Name) is not episode $($item.Tag.First): it holds $($item.Covers -join ' + '), cut at ch $($found.SplitAt -join ','). Episode $('{0:D2}' -f $item.Tag.First) is free again."
-}
-
-# Explicit cut points beat anything worked out above.
-if ($SplitAt) {
-    $overrides = Get-SplitOverrides $SplitAt
-    $ranges = @($items | Where-Object { $_.Tag -and $_.Tag.Last -gt $_.Tag.First })
-
-    foreach ($key in @($overrides.Keys | Where-Object { $_ -ne "" })) {
-        $match = @($ranges | Where-Object { $_.File.BaseName -ieq $key -or $_.File.Name -ieq $key })
-        if ($match.Count -ne 1) {
-            Write-Host "Error: -SplitAt names '$key', which isn't one range-named file here. Range-named files: $(($ranges | ForEach-Object { $_.File.BaseName }) -join ', ')"
-            exit 1
-        }
-        Set-ExplicitSplit $match[0] $overrides[$key]
-    }
-
-    if ($overrides.Contains("")) {
-        # No file named, so it has to be obvious which one is meant: the only
-        # range-named file, or the only one the arithmetic couldn't settle.
-        $unsettled = @($ranges | Where-Object { -not $_.SplitAt })
-        $target = if ($unsettled.Count -eq 1) {
-            $unsettled[0]
-        } elseif ($ranges.Count -eq 1) {
-            $ranges[0]
-        } else {
-            $null
-        }
-
-        if (-not $target) {
-            Write-Host "Error: -SplitAt $($overrides['' ] -join ',') doesn't say which file to cut, and there are $($ranges.Count) range-named files here: $(($ranges | ForEach-Object { $_.File.BaseName }) -join ', '). Write it as -SplitAt `"<file>=$($overrides[''] -join ',')`"."
-            exit 1
-        }
-        Set-ExplicitSplit $target $overrides[""]
-    }
 }
 
 $unnamed = @($items | Where-Object { -not $_.Tag })
@@ -926,16 +812,14 @@ foreach ($item in $items) {
             $tag = "E{0:D2}-E{1:D2}" -f $first, $last
 
             # Redundant if every episode it holds also exists on its own - then
-            # it just moves aside, and splitting it would remux gigabytes into
-            # files that are already there.
+            # it just moves aside. Otherwise it is kept whole under its range
+            # name, which ConvertNext.ps1 turns into "<Show> - S01E01-E03.mkv".
             $singles = @($items | Where-Object { $_.Kind -eq "Episode" } | ForEach-Object { $_.Episodes[0] })
             $missing = @($item.Episodes | Where-Object { $singles -notcontains $_ })
 
             if ($missing.Count -eq 0) {
                 $item.SplitAt = $null
                 $item.Evidence += "; every episode in it exists on its own"
-                $item.Target = Join-Path $extraDir ("PlayAll_{0}.mkv" -f $tag)
-            } elseif ($Split -and $item.SplitAt) {
                 $item.Target = Join-Path $extraDir ("PlayAll_{0}.mkv" -f $tag)
             } else {
                 $item.Target = Join-Path $SeasonDir "$tag.mkv"
@@ -962,9 +846,9 @@ $willExist = @($items | Where-Object { $_.Kind -eq "Episode" } | ForEach-Object 
 foreach ($item in @($items | Where-Object { $_.Kind -eq "PlayAll" })) {
     # A Play All kept whole under its range name covers those episodes too -
     # ConvertNext.ps1 turns E01-E03.mkv into "<Show> - S01E01-E03.mkv", which
-    # Plex reads as all three. One about to be split covers them as well.
+    # Plex reads as all three.
     $keptWhole = $item.Target -and -not ($item.Target -like "$extraDir*")
-    if ($keptWhole -or ($Split -and $item.SplitAt)) { $willExist += $item.Episodes }
+    if ($keptWhole) { $willExist += $item.Episodes }
 }
 $willExist = @($willExist | Sort-Object -Unique)
 if ($willExist.Count -gt 0) {
@@ -995,30 +879,6 @@ foreach ($item in $items) {
         continue
     }
 
-    if ($item.Kind -eq "PlayAll" -and $Split -and $item.SplitAt) {
-        $lengths = Get-BlockLengths $item.Facts $item.SplitAt
-        for ($i = 0; $i -lt $item.Episodes.Count; $i++) {
-            $ep = $item.Episodes[$i]
-            $len = if ($i -lt $lengths.Count) { Format-Length $lengths[$i] } else { "?" }
-            $epPath = Join-Path $SeasonDir ("E{0:D2}.mkv" -f $ep)
-            # That episode may already be here under its own name, or be about to
-            # be: a title of its own that this run numbered. Either way the piece
-            # cut out of the Play All is a second copy and gets parked.
-            $ownFile = @($items | Where-Object { $_.Kind -eq "Episode" -and $_.Episodes -contains $ep })
-            if (Test-Path -LiteralPath $epPath) {
-                Write-Host ("   part {0} ({1}) -> E{2:D2}.mkv already exists, that piece goes to _extra" -f ($i + 1), $len, $ep)
-            } elseif ($ownFile) {
-                Write-Host ("   part {0} ({1}) -> _extra; E{2:D2}.mkv comes from {3}" -f ($i + 1), $len, $ep, $ownFile[0].File.Name)
-            } else {
-                Write-Host ("   part {0} ({1}) -> E{2:D2}.mkv" -f ($i + 1), $len, $ep)
-            }
-        }
-        Write-Host (" {0,-16} SPLIT at chapters {1}, original -> _extra\{2}" -f `
-            $item.File.Name, ($item.SplitAt -join ','), (Split-Path $item.Target -Leaf))
-        $actions += $item
-        continue
-    }
-
     if ($item.File.FullName -eq $item.Target) {
         Write-Host (" {0,-16} already correct" -f $item.File.Name)
         continue
@@ -1035,19 +895,9 @@ if (-not $actions) {
     exit 0
 }
 
-# Renames first, splits last. A split writes E<nn>.mkv for every block it can't
-# find an owner for, so if it ran before the rename of the title that owns that
-# episode, the rename would then land on a file that exists. (Sort-Object has no
-# -Stable on PowerShell 5.1, hence the two passes.)
-$splitFirst = { param($i) $i.Kind -eq "PlayAll" -and $Split -and $i.SplitAt }
-$actions = @($actions | Where-Object { -not (& $splitFirst $_) }) + @($actions | Where-Object { & $splitFirst $_ })
-
 if (-not $Execute) {
     Write-Host ""
     Write-Host "Dry run. Re-run with -Execute to apply."
-    if (-not $Split -and @($items | Where-Object { $_.Kind -eq 'PlayAll' -and $_.SplitAt }).Count -gt 0) {
-        Write-Host "Add -Split to cut the Play All titles into single episodes instead of keeping them whole."
-    }
     exit 0
 }
 
@@ -1056,7 +906,6 @@ if (-not $Execute) {
 # Refuse to start if a rename would land on a file that's already there.
 $blockers = @()
 foreach ($item in $actions) {
-    if ($item.Kind -eq "PlayAll" -and $Split -and $item.SplitAt) { continue }
     if ((Test-Path -LiteralPath $item.Target) -and $item.Target -ne $item.File.FullName) {
         $blockers += "target already exists: $($item.Target)"
     }
@@ -1069,52 +918,13 @@ if ($blockers) {
 }
 
 $log = Join-Path $SeasonDir "rename-log.txt"
-Add-Content -Path $log -Value "# NameEpisodes $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  Index=$Index Split=$($Split.IsPresent)"
+Add-Content -Path $log -Value "# NameEpisodes $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  Index=$Index"
 
 Write-Host ""
 Write-Host "--- applying ---"
 foreach ($item in $actions) {
     if (-not (Test-Path $extraDir) -and $item.Target -like "$extraDir*") {
         New-Item -ItemType Directory -Path $extraDir | Out-Null
-    }
-
-    if ($item.Kind -eq "PlayAll" -and $Split -and $item.SplitAt) {
-        $stem = Join-Path $SeasonDir ("$($item.File.BaseName)_part.mkv")
-        & $MkvMerge_Exe -o "$stem" --split "chapters:$($item.SplitAt -join ',')" "$($item.File.FullName)" |
-            ForEach-Object { Write-Host "   $_" }
-
-        if ($LASTEXITCODE -gt 1) {
-            Write-Host " mkvmerge failed (exit $LASTEXITCODE) on $($item.File.Name) - leaving it alone."
-            continue
-        }
-
-        $parts = @(Get-ChildItem -Path $SeasonDir -Filter "$($item.File.BaseName)_part-*.mkv" -File | Sort-Object Name)
-        if ($parts.Count -ne $item.Episodes.Count) {
-            Write-Host (" expected {0} parts, got {1} - leaving them as {2}_part-*.mkv for you to check." -f `
-                $item.Episodes.Count, $parts.Count, $item.File.BaseName)
-            continue
-        }
-
-        for ($i = 0; $i -lt $parts.Count; $i++) {
-            $epName = "E{0:D2}.mkv" -f $item.Episodes[$i]
-            $epPath = Join-Path $SeasonDir $epName
-            if (Test-Path -LiteralPath $epPath) {
-                # That episode already exists on its own - this piece is a copy.
-                $spare = Join-Path $extraDir ("{0}_from_{1}" -f $epName, $item.File.Name)
-                Move-Item -LiteralPath $parts[$i].FullName -Destination $spare
-                Add-Content -Path $log -Value "$($item.File.Name) part $($i+1) -> _extra\$(Split-Path $spare -Leaf) (E$('{0:D2}' -f $item.Episodes[$i]) already existed)"
-                Write-Host ("   part {0} -> _extra\{1}" -f ($i + 1), (Split-Path $spare -Leaf))
-            } else {
-                Move-Item -LiteralPath $parts[$i].FullName -Destination $epPath
-                Add-Content -Path $log -Value "$($item.File.Name) part $($i+1) -> $epName"
-                Write-Host ("   part {0} -> {1}" -f ($i + 1), $epName)
-            }
-        }
-
-        Move-Item -LiteralPath $item.File.FullName -Destination $item.Target
-        Add-Content -Path $log -Value "$($item.File.Name) -> _extra\$(Split-Path $item.Target -Leaf)"
-        Write-Host (" {0} -> _extra\{1}" -f $item.File.Name, (Split-Path $item.Target -Leaf))
-        continue
     }
 
     Move-Item -LiteralPath $item.File.FullName -Destination $item.Target
