@@ -75,7 +75,7 @@ file: [simplify-scripts.md](simplify-scripts.md)
 - is there an optional feature that would remove much code from scripts?
 - poster image feature can be dropped.
 
-### restructure NameEpisodes [draft, low]
+### restructure NameEpisodes [planned, low]
 
 file: [restructure-nameepisodes.md](restructure-nameepisodes.md)
 
